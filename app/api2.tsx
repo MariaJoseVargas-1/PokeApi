@@ -16,9 +16,10 @@ import {
     useNaruto,
 } from "../context/NarutoContext";
 
-const API_URL = "http://localhost:3001";
+// Dirección del microservicio de Naruto para Expo Go
+const API_URL = "http://10.148.18.133:3001";
 
-// Traducir algunas técnicas al español
+// Traducir algunas técnicas
 const traducirTecnica = (tecnica: string) => {
   const traducciones: { [key: string]: string } = {
     "All Directions Shuriken": "Shuriken en todas las direcciones",
@@ -176,7 +177,7 @@ export default function Api2() {
       <View style={estilos.encabezado}>
         <FontAwesome name="leaf" size={42} color="#2878D0" />
 
-        <Text style={estilos.titulo}>Bienvenido a la aldea</Text>
+        <Text style={estilos.titulo}>Mundo Ninja</Text>
 
         <Text style={estilos.subtitulo}>
           ¡Encuentra tu ninja favorito!
@@ -244,7 +245,7 @@ export default function Api2() {
             )}
           </View>
 
-          {/* Tarjetas de clan y técnicas */}
+          {/* Clan y técnicas */}
           <View style={estilos.filaTarjetas}>
             {personaje.clan !== "" && (
               <View style={estilos.tarjetaInferior}>

@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { useNaruto } from "../context/NarutoContext";
 
-// Traducciones
+// Traducir algunos términos
 const traducir = (texto: string): string => {
   const traducciones: { [key: string]: string } = {
     Male: "Masculino",
@@ -44,14 +44,11 @@ const traducir = (texto: string): string => {
   return traducciones[texto] || texto;
 };
 
-// Convertir cualquier valor en texto
+// Convertir valores a texto
 const aTexto = (valor: any): string => {
   if (valor === null || valor === undefined) return "";
 
-  if (
-    typeof valor === "string" ||
-    typeof valor === "number"
-  ) {
+  if (typeof valor === "string" || typeof valor === "number") {
     return String(valor);
   }
 
@@ -64,7 +61,6 @@ const aTexto = (valor: any): string => {
       .map(([clave, contenido]) => {
         const valorTexto = aTexto(contenido);
         if (!valorTexto) return "";
-
         return `${traducir(clave)}: ${valorTexto}`;
       })
       .filter(Boolean)
@@ -79,7 +75,7 @@ const traducirLista = (lista: string[]): string[] => {
   return lista.map((elemento) => traducir(elemento));
 };
 
-// Tarjeta de información con scroll
+// Tarjeta con desplazamiento
 function TarjetaInfo({
   titulo,
   icono,
@@ -89,21 +85,14 @@ function TarjetaInfo({
   icono: React.ComponentProps<typeof FontAwesome>["name"];
   contenido: string[];
 }) {
-  const datos = contenido.filter(
-    (dato) => dato.trim() !== ""
-  );
+  const datos = contenido.filter((dato) => dato.trim() !== "");
 
   if (datos.length === 0) return null;
 
   return (
     <View style={estilos.tarjeta}>
       <View style={estilos.encabezadoTarjeta}>
-        <FontAwesome
-          name={icono}
-          size={20}
-          color="#2878D0"
-        />
-
+        <FontAwesome name={icono} size={20} color="#2878D0" />
         <Text style={estilos.tituloTarjeta}>{titulo}</Text>
       </View>
 
@@ -137,7 +126,6 @@ export default function Datos2() {
             size={50}
             color="#91A8C4"
           />
-
           <Text style={estilos.textoInicial}>
             Primero busca un personaje en la pestaña Naruto.
           </Text>
@@ -151,9 +139,7 @@ export default function Datos2() {
   const debut = personaje.debut || {};
 
   const datosPersonales = [
-    personal.sex
-      ? `Sexo: ${traducir(aTexto(personal.sex))}`
-      : "",
+    personal.sex ? `Sexo: ${traducir(aTexto(personal.sex))}` : "",
     personal.age ? `Edad: ${aTexto(personal.age)}` : "",
     personal.status
       ? `Estado: ${traducir(aTexto(personal.status))}`
@@ -173,19 +159,14 @@ export default function Datos2() {
     personal.birthdate
       ? `Fecha de nacimiento: ${aTexto(personal.birthdate)}`
       : "",
-    personal.height
-      ? `Altura: ${aTexto(personal.height)}`
-      : "",
-    personal.weight
-      ? `Peso: ${aTexto(personal.weight)}`
-      : "",
+    personal.height ? `Altura: ${aTexto(personal.height)}` : "",
+    personal.weight ? `Peso: ${aTexto(personal.weight)}` : "",
   ].filter(Boolean);
 
   const datosFamilia = Object.entries(familia)
     .map(([relacion, nombre]) => {
       const valor = aTexto(nombre);
       if (!valor) return "";
-
       return `${traducir(relacion)}: ${valor}`;
     })
     .filter(Boolean);
@@ -194,33 +175,24 @@ export default function Datos2() {
     ? [traducir(personaje.rank)]
     : [];
 
-  const datosNaturaleza = traducirLista(
-    personaje.natureType || []
-  );
-
-  const datosTecnicas = traducirLista(
-    personaje.jutsu || []
-  );
+  const datosNaturaleza = traducirLista(personaje.natureType || []);
+  const datosTecnicas = traducirLista(personaje.jutsu || []);
 
   const datosHabilidades = [
     ...(personaje.uniqueTraits || []),
     ...(personaje.kekkeiGenkai || []),
   ].map(traducir);
 
-  const datosHerramientas = traducirLista(
-    personaje.tools || []
-  );
+  const datosHerramientas = traducirLista(personaje.tools || []);
+  const datosAfiliacion = personaje.affiliation || [];
 
   const datosDebut = Object.entries(debut)
     .map(([medio, valor]) => {
       const texto = aTexto(valor);
       if (!texto) return "";
-
       return `${traducir(medio)}: ${texto}`;
     })
     .filter(Boolean);
-
-  const datosAfiliacion = personaje.affiliation || [];
 
   return (
     <ScrollView
@@ -228,7 +200,6 @@ export default function Datos2() {
       contentContainerStyle={estilos.contenedor}
       showsVerticalScrollIndicator
     >
-      {/* Encabezado */}
       <View style={estilos.encabezado}>
         {personaje.images[0] ? (
           <Image
@@ -244,9 +215,7 @@ export default function Datos2() {
           />
         )}
 
-        <Text style={estilos.nombre}>
-          {personaje.name}
-        </Text>
+        <Text style={estilos.nombre}>{personaje.name}</Text>
 
         {personaje.clan !== "" && (
           <Text style={estilos.subtitulo}>
@@ -255,7 +224,6 @@ export default function Datos2() {
         )}
       </View>
 
-      {/* Tarjetas de información */}
       <View style={estilos.listaTarjetas}>
         <TarjetaInfo
           titulo="Información personal"

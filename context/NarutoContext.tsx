@@ -10,16 +10,13 @@ export interface PersonajeNaruto {
   id: number | string;
   name: string;
   images: string[];
-
   clan: string;
   village: string;
   jutsu: string[];
   natureType: string[];
-
   rank: string;
   description: string;
   affiliation: string[];
-
   family?: Record<string, any>;
   personal?: Record<string, any>;
   debut?: Record<string, any>;
