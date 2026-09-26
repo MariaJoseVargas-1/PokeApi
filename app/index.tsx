@@ -97,8 +97,8 @@ export default function Principal() {
       setError("");
 
       const respuesta = await fetch(
-        `http://192.168.1.238:3000/pokemon/${nombre.trim().toLowerCase()}`
-      );
+      `http://10.148.18.133:3000/pokemon/${nombre.trim().toLowerCase()}`
+     );
 
       const datos = await respuesta.json();
 
