@@ -1,0 +1,186 @@
+
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "API de Docentes - Universidad Horizonte",
+    "description": "Microservicio agnóstico desarrollado en Node.js nativo y conectado a PostgreSQL en Railway.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Servidor actual"
+    }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Comprobar el microservicio",
+        "responses": {
+          "200": {
+            "description": "Servidor funcionando correctamente"
+          }
+        }
+      }
+    },
+    "/docentes": {
+      "get": {
+        "summary": "Obtener todos los docentes",
+        "description": "Devuelve los docentes de la Universidad Horizonte.",
+        "responses": {
+          "200": {
+            "description": "Lista de docentes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Docente"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error al consultar PostgreSQL"
+          }
+        }
+      }
+    },
+    "/docentes/buscar": {
+      "get": {
+        "summary": "Buscar docentes por nombre",
+        "parameters": [
+          {
+            "name": "nombre",
+            "in": "query",
+            "required": true,
+            "description": "Nombre o parte del nombre del docente",
+            "schema": {
+              "type": "string"
+            },
+            "example": "Laura"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Docentes encontrados",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Docente"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nombre no proporcionado"
+          },
+          "500": {
+            "description": "Error al buscar docentes"
+          }
+        }
+      }
+    },
+    "/docentes/{id}": {
+      "get": {
+        "summary": "Obtener docente por ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Identificador del docente",
+            "schema": {
+              "type": "integer"
+            },
+            "example": 1
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Datos del docente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Docente"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "ID inválido"
+          },
+          "404": {
+            "description": "Docente no encontrado"
+          },
+          "500": {
+            "description": "Error al consultar PostgreSQL"
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "Obtener la documentación OpenAPI",
+        "responses": {
+          "200": {
+            "description": "Documento OpenAPI del microservicio"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Docente": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 1
+          },
+          "nombre": {
+            "type": "string",
+            "example": "Laura Martínez"
+          },
+          "imagen": {
+            "type": "string",
+            "example": "https://i.pravatar.cc/300?img=47"
+          },
+          "profesion": {
+            "type": "string",
+            "example": "Ingeniera de Sistemas"
+          },
+          "facultad": {
+            "type": "string",
+            "example": "Facultad de Ingeniería"
+          },
+          "materias": {
+            "type": "string",
+            "example": "Programación, Estructuras de Datos, Desarrollo Web"
+          },
+          "correo": {
+            "type": "string",
+            "example": "laura.martinez@horizonte.example"
+          },
+          "experiencia": {
+            "type": "string",
+            "example": "12 años de experiencia"
+          },
+          "resumen": {
+            "type": "string",
+            "example": "Docente especializada en programación."
+          },
+          "perfil": {
+            "type": "string",
+            "example": "Información completa del perfil docente."
+          }
+        }
+      }
+    }
+  }
+}
