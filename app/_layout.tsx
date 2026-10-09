@@ -1,3 +1,4 @@
+
 import { FontAwesome } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import React from "react";
@@ -31,6 +32,7 @@ export default function Layout() {
             },
           }}
         >
+          {/* Primera pestaña: Pokemon */}
           <Tabs.Screen
             name="index"
             options={{
@@ -45,6 +47,7 @@ export default function Layout() {
             }}
           />
 
+          {/* Segunda pestaña: datos de Pokemon */}
           <Tabs.Screen
             name="datos"
             options={{
@@ -59,6 +62,7 @@ export default function Layout() {
             }}
           />
 
+          {/* Tercera pestaña: Naruto */}
           <Tabs.Screen
             name="api2"
             options={{
@@ -73,6 +77,7 @@ export default function Layout() {
             }}
           />
 
+          {/* Cuarta pestaña: datos de Naruto */}
           <Tabs.Screen
             name="datos2"
             options={{
@@ -80,6 +85,21 @@ export default function Layout() {
               tabBarIcon: ({ color, size }) => (
                 <FontAwesome
                   name="address-card"
+                  size={size}
+                  color={color}
+                />
+              ),
+            }}
+          />
+
+          {/* Quinta pestaña: docentes de UNINPAHU */}
+          <Tabs.Screen
+            name="docentes"
+            options={{
+              title: "Docentes",
+              tabBarIcon: ({ color, size }) => (
+                <FontAwesome
+                  name="graduation-cap"
                   size={size}
                   color={color}
                 />
