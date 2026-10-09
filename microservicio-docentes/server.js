@@ -1,4 +1,3 @@
-
 const http = require("http");
 const { Pool } = require("pg");
 const fs = require("fs");
@@ -8,7 +7,7 @@ const path = require("path");
 const PORT = process.env.PORT || 3002;
 
 // Aqui conectamos nuestro microservicio con PostgreSQL
-// La URL se configura en las variables de Railway
+// La URL se configura en las variables de Railway o Render
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL?.includes("proxy.rlwy.net")
@@ -60,6 +59,47 @@ const servidor = http.createServer(async (req, res) => {
     });
   }
 
+  // Aqui mostramos la interfaz visual de Swagger
+  // Esta pagina permite ver y probar las rutas del microservicio
+  if (ruta === "/api-docs" || ruta === "/api-docs/") {
+    const pagina = `
+      <!DOCTYPE html>
+      <html lang="es">
+      <head>
+        <meta charset="UTF-8">
+        <title>Swagger - Docentes UNINPAHU</title>
+
+        <link
+          rel="stylesheet"
+          href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"
+        >
+      </head>
+
+      <body>
+        <div id="swagger-ui"></div>
+
+        <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+
+        <script>
+          window.onload = function () {
+            SwaggerUIBundle({
+              url: "/openapi.json",
+              dom_id: "#swagger-ui"
+            });
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    // Enviamos la pagina HTML al navegador
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+    });
+
+    return res.end(pagina);
+  }
+
   // Aqui mostramos la documentacion OpenAPI de nuestro servicio
   if (ruta === "/openapi.json") {
     try {
@@ -68,6 +108,8 @@ const servidor = http.createServer(async (req, res) => {
 
       return responder(res, 200, swagger);
     } catch (error) {
+      console.error("Error al cargar Swagger:", error.message);
+
       return responder(res, 500, {
         error: "No se pudo cargar la documentacion",
       });
