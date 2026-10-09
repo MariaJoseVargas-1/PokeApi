@@ -2,10 +2,10 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "API de Docentes - Universidad Horizonte",
-    "description": "Microservicio agnóstico desarrollado en Node.js nativo y conectado a PostgreSQL en Railway.",
-    "version": "1.0.0"
-  },
+  "title": "API de Docentes - UNINPAHU",
+  "description": "Microservicio de docentes ficticios de UNINPAHU, desarrollado en Node.js nativo y conectado a PostgreSQL en Railway.",
+  "version": "1.0.0"
+},
   "servers": [
     {
       "url": "/",
@@ -26,7 +26,7 @@
     "/docentes": {
       "get": {
         "summary": "Obtener todos los docentes",
-        "description": "Devuelve los docentes de la Universidad Horizonte.",
+        "description": "Devuelve los docentes de la Universidad Uninpahu.",
         "responses": {
           "200": {
             "description": "Lista de docentes",
@@ -165,7 +165,7 @@
           },
           "correo": {
             "type": "string",
-            "example": "laura.martinez@horizonte.example"
+            "example": "laura.martinez@uninpahu.example"
           },
           "experiencia": {
             "type": "string",

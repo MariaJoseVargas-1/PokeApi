@@ -52,11 +52,11 @@ const servidor = http.createServer(async (req, res) => {
     });
   }
 
-  // Ruta principal para comprobar que el servidor funciona
+  // Aqui comprobamos que nuestro microservicio funciona
   if (ruta === "/") {
     return responder(res, 200, {
       mensaje: "Microservicio de docentes funcionando correctamente",
-      universidad: "Universidad Horizonte",
+      universidad: "UNINPAHU",
     });
   }
 
