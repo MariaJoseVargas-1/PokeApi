@@ -1,0 +1,109 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Microservicio DELETE Docentes UNINPAHU",
+    "version": "1.0.0",
+    "description": "Microservicio para eliminar docentes de la base de datos PostgreSQL."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/docentes/{id}": {
+      "delete": {
+        "summary": "Eliminar un docente",
+        "description": "Elimina permanentemente un docente de PostgreSQL utilizando su ID.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ID del docente que queremos eliminar",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "example": 11
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Docente eliminado correctamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mensaje": {
+                      "type": "string",
+                      "example": "Docente eliminado correctamente"
+                    },
+                    "docente": {
+                      "$ref": "#/components/schemas/Docente"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Docente no encontrado"
+          },
+          "500": {
+            "description": "Error al eliminar el docente"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Docente": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 11
+          },
+          "nombre": {
+            "type": "string",
+            "example": "Mariana Pérez"
+          },
+          "imagen": {
+            "type": "string",
+            "nullable": true
+          },
+          "profesion": {
+            "type": "string",
+            "nullable": true
+          },
+          "facultad": {
+            "type": "string",
+            "nullable": true
+          },
+          "materias": {
+            "type": "string",
+            "nullable": true
+          },
+          "correo": {
+            "type": "string"
+          },
+          "experiencia": {
+            "type": "string",
+            "nullable": true
+          },
+          "resumen": {
+            "type": "string",
+            "nullable": true
+          },
+          "perfil": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      }
+    }
+  }
+}

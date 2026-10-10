@@ -1,0 +1,12 @@
+{
+  "name": "microservicio-docentes-delete",
+  "version": "1.0.0",
+  "description": "Microservicio para eliminar docentes UNINPAHU",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

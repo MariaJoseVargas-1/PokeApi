@@ -1,0 +1,113 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Microservicio PUT Docentes UNINPAHU",
+    "version": "1.0.0",
+    "description": "Microservicio para actualizar los datos de docentes existentes en PostgreSQL."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/docentes/{id}": {
+      "put": {
+        "summary": "Actualizar un docente",
+        "description": "Permite modificar uno o varios campos de un docente utilizando su ID.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ID del docente que queremos actualizar",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "example": 11
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Datos del docente que queremos modificar",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActualizarDocente"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Docente actualizado correctamente"
+          },
+          "400": {
+            "description": "Datos incorrectos o incompletos"
+          },
+          "404": {
+            "description": "Docente no encontrado"
+          },
+          "500": {
+            "description": "Error al actualizar el docente"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActualizarDocente": {
+        "type": "object",
+        "minProperties": 1,
+        "description": "Solo es necesario enviar los campos que queremos actualizar.",
+        "properties": {
+          "nombre": {
+            "type": "string",
+            "example": "Mariana Pérez"
+          },
+          "imagen": {
+            "type": "string",
+            "nullable": true,
+            "example": "https://i.pravatar.cc/300?img=32"
+          },
+          "profesion": {
+            "type": "string",
+            "nullable": true,
+            "example": "Ingeniera de Software"
+          },
+          "facultad": {
+            "type": "string",
+            "nullable": true,
+            "example": "Ingeniería"
+          },
+          "materias": {
+            "type": "string",
+            "nullable": true,
+            "example": "Programación y bases de datos"
+          },
+          "correo": {
+            "type": "string",
+            "example": "mariana.perez@uninpahu.example"
+          },
+          "experiencia": {
+            "type": "string",
+            "nullable": true,
+            "example": "6 años de experiencia docente"
+          },
+          "resumen": {
+            "type": "string",
+            "nullable": true,
+            "example": "Docente especializada en desarrollo de software"
+          },
+          "perfil": {
+            "type": "string",
+            "nullable": true,
+            "example": "Profesional con experiencia en programación y tecnología"
+          }
+        }
+      }
+    }
+  }
+}

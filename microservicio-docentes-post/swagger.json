@@ -1,0 +1,89 @@
+
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Microservicio POST Docentes UNINPAHU",
+    "version": "1.0.0",
+    "description": "Microservicio para registrar docentes en PostgreSQL."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/docentes": {
+      "post": {
+        "summary": "Registrar un nuevo docente",
+        "description": "Recibe los datos de un docente y los guarda en PostgreSQL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Docente"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Docente registrado correctamente"
+          },
+          "400": {
+            "description": "Datos invalidos"
+          },
+          "500": {
+            "description": "Error del servidor"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Docente": {
+        "type": "object",
+        "required": ["nombre", "correo"],
+        "properties": {
+          "nombre": {
+            "type": "string",
+            "example": "Mariana Perez"
+          },
+          "imagen": {
+            "type": "string",
+            "example": "https://i.pravatar.cc/300?img=32"
+          },
+          "profesion": {
+            "type": "string",
+            "example": "Ingeniera de Sistemas"
+          },
+          "facultad": {
+            "type": "string",
+            "example": "Ingenieria"
+          },
+          "materias": {
+            "type": "string",
+            "example": "Programacion y bases de datos"
+          },
+          "correo": {
+            "type": "string",
+            "example": "mariana.perez@uninpahu.example"
+          },
+          "experiencia": {
+            "type": "string",
+            "example": "5 años de experiencia docente"
+          },
+          "resumen": {
+            "type": "string",
+            "example": "Docente de programacion"
+          },
+          "perfil": {
+            "type": "string",
+            "example": "Especialista en desarrollo de software"
+          }
+        }
+      }
+    }
+  }
+}
