@@ -1,25 +1,26 @@
 import React, { useState } from "react";
 
 import {
-    ActivityIndicator,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 import { FontAwesome } from "@expo/vector-icons";
+import { router } from "expo-router";
 
-// URL publica de nuestro microservicio en Render
-// Funciona en Expo Go y Expo Web sin utilizar una IP local
+// Microservicio GET desplegado en Render.
+// Funciona en Expo Go y Expo Web sin IP local.
 const API_URL = "https://microservicio-docentes.onrender.com";
 
-// Aqui definimos los datos que recibimos de PostgreSQL
+// Estructura de los docentes guardados en PostgreSQL.
 type Docente = {
   id: number;
   nombre: string;
@@ -34,22 +35,22 @@ type Docente = {
 };
 
 export default function Docentes() {
-  // Guarda lo que escribimos en el buscador
+  // Texto que escribimos en el buscador.
   const [busqueda, setBusqueda] = useState("");
 
-  // Guarda el docente encontrado
+  // Docente que encontramos en la base de datos.
   const [docente, setDocente] = useState<Docente | null>(null);
 
-  // Controla si mostramos el resumen o el perfil completo
+  // Controla si vemos el resumen o el perfil completo.
   const [verMas, setVerMas] = useState(false);
 
-  // Indica si estamos consultando el microservicio
+  // Indica si estamos esperando la respuesta del GET.
   const [cargando, setCargando] = useState(false);
 
-  // Guarda los mensajes para el usuario
+  // Mensajes que mostramos al usuario.
   const [mensaje, setMensaje] = useState("");
 
-  // Esta funcion busca un docente por su nombre
+  // GET: buscar un docente por su nombre.
   const buscarDocente = async () => {
     const nombre = busqueda.trim();
 
@@ -66,7 +67,6 @@ export default function Docentes() {
     setVerMas(false);
 
     try {
-      // Enviamos el nombre mediante query params
       const respuesta = await fetch(
         `${API_URL}/docentes/buscar?nombre=${encodeURIComponent(nombre)}`
       );
@@ -78,7 +78,7 @@ export default function Docentes() {
       const datos: Docente[] = await respuesta.json();
 
       if (datos.length > 0) {
-        // Mostramos el primer docente que coincida
+        // Mostramos el primer docente encontrado.
         setDocente(datos[0]);
       } else {
         setMensaje("No encontramos un docente con ese nombre.");
@@ -90,14 +90,14 @@ export default function Docentes() {
     }
   };
 
-  // Esta funcion muestra el perfil completo
-  const mostrarPerfil = () => {
-    setVerMas(true);
+  // Cambia entre resumen y perfil completo.
+  const cambiarVista = () => {
+    setVerMas(!verMas);
   };
 
-  // Esta funcion regresa al resumen
-  const regresar = () => {
-    setVerMas(false);
+  // Abre la pantalla de administración del CRUD.
+  const abrirAdministracion = () => {
+    router.push("/administrar-docentes");
   };
 
   return (
@@ -106,8 +106,7 @@ export default function Docentes() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={styles.contenedor}>
-
-        {/* Encabezado de la pantalla */}
+        {/* Encabezado original */}
         <View style={styles.encabezado}>
           <View style={styles.iconoUniversidad}>
             <FontAwesome
@@ -128,7 +127,7 @@ export default function Docentes() {
           </View>
         </View>
 
-        {/* Buscador: permanece fuera del scroll */}
+        {/* Buscador original */}
         <View style={styles.buscador}>
           <FontAwesome
             name="search"
@@ -208,10 +207,30 @@ export default function Docentes() {
           </View>
         )}
 
+        {/*
+          Cuando todavía no hay un docente seleccionado,
+          mostramos un botón pequeño para entrar al CRUD.
+        */}
+        {!docente && !cargando && (
+          <TouchableOpacity
+            style={styles.botonAdministrarInicial}
+            onPress={abrirAdministracion}
+          >
+            <FontAwesome
+              name="cogs"
+              size={15}
+              color="#FFFFFF"
+            />
+
+            <Text style={styles.textoBotonPequeno}>
+              Administrar docentes
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* Tarjeta principal del docente */}
         {docente && !cargando && (
           <View style={styles.tarjeta}>
-
             {/* Encabezado fijo de la tarjeta */}
             <View style={styles.encabezadoTarjeta}>
               <Image
@@ -243,10 +262,10 @@ export default function Docentes() {
               </View>
             </View>
 
-            {/* Linea que separa el encabezado del contenido */}
+            {/* Línea separadora */}
             <View style={styles.separador} />
 
-            {/* Titulo del contenido */}
+            {/* Título de la información */}
             <View style={styles.filaSeccion}>
               <Text style={styles.tituloSeccion}>
                 {verMas ? "Perfil académico" : "Sobre el docente"}
@@ -265,7 +284,11 @@ export default function Docentes() {
               </View>
             </View>
 
-            {/* SOLO ESTA PARTE TIENE SCROLL */}
+            {/*
+              SCROLL INTERNO:
+              Solamente se desplaza la información del docente.
+              El encabezado y los botones permanecen fijos.
+            */}
             <View style={styles.areaInformacion}>
               <ScrollView
                 style={styles.scrollInterno}
@@ -274,14 +297,15 @@ export default function Docentes() {
                 showsVerticalScrollIndicator={true}
                 keyboardShouldPersistTaps="handled"
               >
-                {/* Vista del resumen */}
                 {!verMas ? (
+                  // Vista del resumen.
                   <View style={styles.bloqueInformacion}>
                     <Text style={styles.textoInformacion}>
                       {docente.resumen}
                     </Text>
                   </View>
                 ) : (
+                  // Vista del perfil completo.
                   <>
                     {/* Facultad */}
                     <View style={styles.bloqueInformacion}>
@@ -382,24 +406,44 @@ export default function Docentes() {
               </ScrollView>
             </View>
 
-            {/* Boton fijo debajo del scroll */}
-            <TouchableOpacity
-              style={styles.botonPrincipal}
-              onPress={verMas ? regresar : mostrarPerfil}
-            >
-              <FontAwesome
-                name={verMas ? "arrow-left" : "arrow-right"}
-                size={16}
-                color="#FFFFFF"
-              />
+            {/*
+              NUEVO DISEÑO:
+              Dos botones pequeños en la parte inferior.
+              Ambos permanecen fuera del scroll.
+            */}
+            <View style={styles.filaBotones}>
+              {/* Botón para cambiar entre resumen y perfil */}
+              <TouchableOpacity
+                style={styles.botonResumen}
+                onPress={cambiarVista}
+              >
+                <FontAwesome
+                  name={verMas ? "arrow-left" : "arrow-right"}
+                  size={14}
+                  color="#FFFFFF"
+                />
 
-              <Text style={styles.textoBoton}>
-                {verMas
-                  ? "Regresar al resumen"
-                  : "Ver perfil completo"}
-              </Text>
-            </TouchableOpacity>
+                <Text style={styles.textoBotonPequeno}>
+                  {verMas ? "Resumen" : "Ver perfil"}
+                </Text>
+              </TouchableOpacity>
 
+              {/* Botón para administrar docentes */}
+              <TouchableOpacity
+                style={styles.botonAdministrar}
+                onPress={abrirAdministracion}
+              >
+                <FontAwesome
+                  name="cogs"
+                  size={14}
+                  color="#FFFFFF"
+                />
+
+                <Text style={styles.textoBotonPequeno}>
+                  Administrar
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
       </View>
@@ -407,8 +451,7 @@ export default function Docentes() {
   );
 }
 
-// Estilos de la pantalla
-// Utilizamos los mismos tonos azules de nuestra aplicacion
+// Estilos de nuestra aplicación.
 const styles = StyleSheet.create({
   pantalla: {
     flex: 1,
@@ -417,12 +460,12 @@ const styles = StyleSheet.create({
 
   contenedor: {
     flex: 1,
-  width: "100%",
-  maxWidth: 650,
-  alignSelf: "center",
-  paddingHorizontal: 16,
-  paddingTop: Platform.OS === "android" ? 55 : 24,
-  paddingBottom: 18,
+    width: "100%",
+    maxWidth: 650,
+    alignSelf: "center",
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === "android" ? 55 : 24,
+    paddingBottom: 18,
   },
 
   encabezado: {
@@ -676,21 +719,56 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
-  botonPrincipal: {
+  // Botones pequeños colocados horizontalmente.
+  filaBotones: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 12,
+    gap: 10,
+  },
+
+  // Botón para ver el perfil o regresar al resumen.
+  botonResumen: {
+    flex: 1,
     backgroundColor: "#2878D0",
-    borderRadius: 13,
-    paddingVertical: 15,
-    paddingHorizontal: 15,
+    borderRadius: 11,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // Botón para abrir la administración.
+  botonAdministrar: {
+    flex: 1,
+    backgroundColor: "#174D8A",
+    borderRadius: 11,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // Texto compartido por los botones pequeños.
+  textoBotonPequeno: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "bold",
+    marginLeft: 7,
+  },
+
+  // Botón disponible antes de buscar un docente.
+  botonAdministrarInicial: {
+    alignSelf: "center",
+    backgroundColor: "#174D8A",
+    borderRadius: 11,
+    paddingVertical: 11,
+    paddingHorizontal: 18,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
     marginTop: 15,
-  },
-
-  textoBoton: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "bold",
-    marginLeft: 10,
   },
 });

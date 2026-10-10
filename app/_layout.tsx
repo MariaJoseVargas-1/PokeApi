@@ -1,4 +1,3 @@
-
 import { FontAwesome } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import React from "react";
@@ -38,11 +37,7 @@ export default function Layout() {
             options={{
               title: "Principal",
               tabBarIcon: ({ color, size }) => (
-                <FontAwesome
-                  name="home"
-                  size={size}
-                  color={color}
-                />
+                <FontAwesome name="home" size={size} color={color} />
               ),
             }}
           />
@@ -53,11 +48,7 @@ export default function Layout() {
             options={{
               title: "Datos",
               tabBarIcon: ({ color, size }) => (
-                <FontAwesome
-                  name="bar-chart"
-                  size={size}
-                  color={color}
-                />
+                <FontAwesome name="bar-chart" size={size} color={color} />
               ),
             }}
           />
@@ -68,11 +59,7 @@ export default function Layout() {
             options={{
               title: "API2",
               tabBarIcon: ({ color, size }) => (
-                <FontAwesome
-                  name="leaf"
-                  size={size}
-                  color={color}
-                />
+                <FontAwesome name="leaf" size={size} color={color} />
               ),
             }}
           />
@@ -83,11 +70,7 @@ export default function Layout() {
             options={{
               title: "Datos 2",
               tabBarIcon: ({ color, size }) => (
-                <FontAwesome
-                  name="address-card"
-                  size={size}
-                  color={color}
-                />
+                <FontAwesome name="address-card" size={size} color={color} />
               ),
             }}
           />
@@ -104,6 +87,19 @@ export default function Layout() {
                   color={color}
                 />
               ),
+            }}
+          />
+
+          {/*
+            Pantalla para administrar docentes.
+            No aparece como pestaña en la barra inferior.
+            Se abrirá desde un botón en Docentes.
+          */}
+          <Tabs.Screen
+            name="administrar-docentes"
+            options={{
+              href: null,
+              title: "Administrar docentes",
             }}
           />
         </Tabs>
