@@ -1,11 +1,25 @@
 import { FontAwesome } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import React from "react";
+import React, { useEffect } from "react";
+import { Platform } from "react-native";
 
+// Nuestra base de datos local SQLite
+import { iniciarBaseDeDatos } from "../database_sqlite/database";
+
+// Contextos de Pokemon y Naruto
 import { NarutoProvider } from "../context/NarutoContext";
 import { PokemonProvider } from "../context/PokemonContext";
 
 export default function Layout() {
+
+  // Preparamos SQLite cuando inicia la aplicación.
+  useEffect(() => {
+  // Por ahora inicializamos SQLite solamente en Expo Go.
+  if (Platform.OS !== "web") {
+    iniciarBaseDeDatos();
+  }
+}, []);
+
   return (
     <PokemonProvider>
       <NarutoProvider>

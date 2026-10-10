@@ -1,3 +1,5 @@
+import { FontAwesome } from "@expo/vector-icons";
+import { router } from "expo-router";
 import React, { useState } from "react";
 
 import {
@@ -13,14 +15,17 @@ import {
   View,
 } from "react-native";
 
-import { FontAwesome } from "@expo/vector-icons";
-import { router } from "expo-router";
+// Importamos las funciones de la base de datos.
+// Expo Go usa database.ts y Web usa database.web.ts.
+import {
+  guardarDocentesLocal,
+  obtenerDocentesLocal,
+} from "../database_sqlite/database";
 
-// Microservicio GET desplegado en Render.
-// Funciona en Expo Go y Expo Web sin IP local.
+// Microservicio GET de docentes en Render.
 const API_URL = "https://microservicio-docentes.onrender.com";
 
-// Estructura de los docentes guardados en PostgreSQL.
+// Datos de cada docente.
 type Docente = {
   id: number;
   nombre: string;
@@ -35,22 +40,14 @@ type Docente = {
 };
 
 export default function Docentes() {
-  // Texto que escribimos en el buscador.
   const [busqueda, setBusqueda] = useState("");
-
-  // Docente que encontramos en la base de datos.
   const [docente, setDocente] = useState<Docente | null>(null);
-
-  // Controla si vemos el resumen o el perfil completo.
   const [verMas, setVerMas] = useState(false);
-
-  // Indica si estamos esperando la respuesta del GET.
   const [cargando, setCargando] = useState(false);
-
-  // Mensajes que mostramos al usuario.
   const [mensaje, setMensaje] = useState("");
 
-  // GET: buscar un docente por su nombre.
+  // Primero buscamos en Render.
+  // Si falla la conexión, intentamos consultar SQLite.
   const buscarDocente = async () => {
     const nombre = busqueda.trim();
 
@@ -67,35 +64,62 @@ export default function Docentes() {
     setVerMas(false);
 
     try {
+      // Consultamos los datos de la nube.
       const respuesta = await fetch(
         `${API_URL}/docentes/buscar?nombre=${encodeURIComponent(nombre)}`
       );
 
       if (!respuesta.ok) {
-        throw new Error("Error al consultar el microservicio");
+        throw new Error("No se pudo consultar el microservicio");
       }
 
       const datos: Docente[] = await respuesta.json();
 
       if (datos.length > 0) {
-        // Mostramos el primer docente encontrado.
+        // Guardamos una copia local en Expo Go.
+        // En Web esta función no utiliza SQLite.
+        guardarDocentesLocal(datos);
+
+        // Mostramos el docente encontrado.
         setDocente(datos[0]);
       } else {
         setMensaje("No encontramos un docente con ese nombre.");
       }
     } catch (error) {
-      setMensaje("No se pudo conectar con el microservicio.");
+      // Si falla el fetch, buscamos los datos locales.
+      try {
+        const guardados = obtenerDocentesLocal() as Docente[];
+
+        const encontrado = guardados.find((item) =>
+          item.nombre.toLowerCase().includes(nombre.toLowerCase())
+        );
+
+        if (encontrado) {
+          setDocente(encontrado);
+          setMensaje("Mostrando información guardada sin conexión.");
+        } else {
+          setMensaje(
+            Platform.OS === "web"
+              ? "No se pudo conectar con el microservicio."
+              : "Sin conexión. Este docente todavía no está guardado en SQLite."
+          );
+        }
+      } catch (errorLocal) {
+        setMensaje(
+          "No fue posible consultar la nube ni la base de datos local."
+        );
+      }
     } finally {
       setCargando(false);
     }
   };
 
-  // Cambia entre resumen y perfil completo.
+  // Cambiamos entre resumen y perfil completo.
   const cambiarVista = () => {
     setVerMas(!verMas);
   };
 
-  // Abre la pantalla de administración del CRUD.
+  // Abrimos la pantalla de administración.
   const abrirAdministracion = () => {
     router.push("/administrar-docentes");
   };
@@ -106,7 +130,7 @@ export default function Docentes() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={styles.contenedor}>
-        {/* Encabezado original */}
+        {/* Encabezado */}
         <View style={styles.encabezado}>
           <View style={styles.iconoUniversidad}>
             <FontAwesome
@@ -127,7 +151,7 @@ export default function Docentes() {
           </View>
         </View>
 
-        {/* Buscador original */}
+        {/* Buscador */}
         <View style={styles.buscador}>
           <FontAwesome
             name="search"
@@ -192,7 +216,7 @@ export default function Docentes() {
           </View>
         )}
 
-        {/* Mensajes de error */}
+        {/* Mensajes */}
         {mensaje !== "" && !cargando && (
           <View style={styles.cajaMensaje}>
             <FontAwesome
@@ -207,10 +231,7 @@ export default function Docentes() {
           </View>
         )}
 
-        {/*
-          Cuando todavía no hay un docente seleccionado,
-          mostramos un botón pequeño para entrar al CRUD.
-        */}
+        {/* Botón para administrar sin buscar */}
         {!docente && !cargando && (
           <TouchableOpacity
             style={styles.botonAdministrarInicial}
@@ -228,10 +249,9 @@ export default function Docentes() {
           </TouchableOpacity>
         )}
 
-        {/* Tarjeta principal del docente */}
+        {/* Tarjeta del docente */}
         {docente && !cargando && (
           <View style={styles.tarjeta}>
-            {/* Encabezado fijo de la tarjeta */}
             <View style={styles.encabezadoTarjeta}>
               <Image
                 source={{ uri: docente.imagen }}
@@ -262,10 +282,8 @@ export default function Docentes() {
               </View>
             </View>
 
-            {/* Línea separadora */}
             <View style={styles.separador} />
 
-            {/* Título de la información */}
             <View style={styles.filaSeccion}>
               <Text style={styles.tituloSeccion}>
                 {verMas ? "Perfil académico" : "Sobre el docente"}
@@ -284,11 +302,7 @@ export default function Docentes() {
               </View>
             </View>
 
-            {/*
-              SCROLL INTERNO:
-              Solamente se desplaza la información del docente.
-              El encabezado y los botones permanecen fijos.
-            */}
+            {/* Información con scroll interno */}
             <View style={styles.areaInformacion}>
               <ScrollView
                 style={styles.scrollInterno}
@@ -298,14 +312,12 @@ export default function Docentes() {
                 keyboardShouldPersistTaps="handled"
               >
                 {!verMas ? (
-                  // Vista del resumen.
                   <View style={styles.bloqueInformacion}>
                     <Text style={styles.textoInformacion}>
                       {docente.resumen}
                     </Text>
                   </View>
                 ) : (
-                  // Vista del perfil completo.
                   <>
                     {/* Facultad */}
                     <View style={styles.bloqueInformacion}>
@@ -364,7 +376,7 @@ export default function Docentes() {
                       </Text>
                     </View>
 
-                    {/* Perfil profesional */}
+                    {/* Perfil */}
                     <View style={styles.bloqueInformacion}>
                       <View style={styles.filaEtiqueta}>
                         <FontAwesome
@@ -406,13 +418,8 @@ export default function Docentes() {
               </ScrollView>
             </View>
 
-            {/*
-              NUEVO DISEÑO:
-              Dos botones pequeños en la parte inferior.
-              Ambos permanecen fuera del scroll.
-            */}
+            {/* Botones inferiores */}
             <View style={styles.filaBotones}>
-              {/* Botón para cambiar entre resumen y perfil */}
               <TouchableOpacity
                 style={styles.botonResumen}
                 onPress={cambiarVista}
@@ -428,7 +435,6 @@ export default function Docentes() {
                 </Text>
               </TouchableOpacity>
 
-              {/* Botón para administrar docentes */}
               <TouchableOpacity
                 style={styles.botonAdministrar}
                 onPress={abrirAdministracion}
@@ -451,7 +457,7 @@ export default function Docentes() {
   );
 }
 
-// Estilos de nuestra aplicación.
+// Estilos originales de la aplicación.
 const styles = StyleSheet.create({
   pantalla: {
     flex: 1,
@@ -719,7 +725,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
-  // Botones pequeños colocados horizontalmente.
   filaBotones: {
     flexDirection: "row",
     alignItems: "center",
@@ -727,7 +732,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
 
-  // Botón para ver el perfil o regresar al resumen.
   botonResumen: {
     flex: 1,
     backgroundColor: "#2878D0",
@@ -739,7 +743,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  // Botón para abrir la administración.
   botonAdministrar: {
     flex: 1,
     backgroundColor: "#174D8A",
@@ -751,7 +754,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  // Texto compartido por los botones pequeños.
   textoBotonPequeno: {
     color: "#FFFFFF",
     fontSize: 13,
@@ -759,7 +761,6 @@ const styles = StyleSheet.create({
     marginLeft: 7,
   },
 
-  // Botón disponible antes de buscar un docente.
   botonAdministrarInicial: {
     alignSelf: "center",
     backgroundColor: "#174D8A",

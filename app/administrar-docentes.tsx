@@ -1,26 +1,39 @@
 import { FontAwesome } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
+
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
-// Cada operación utiliza su propio microservicio en Render.
+// Funciones para trabajar sin conexión en Expo Go.
+import {
+  actualizarDocenteLocal,
+  eliminarDocenteLocal,
+  guardarDocentesLocal,
+  obtenerDocentesLocal,
+  obtenerPendientes,
+  registrarDocenteLocal,
+} from "../database_sqlite/database";
+
+import { sincronizarPendientes } from "../database_sqlite/sincronizar";
+
+// Cada operación tiene su microservicio en Render.
 const GET_URL = "https://microservicio-docentes.onrender.com";
 const POST_URL = "https://microservicio-docentes-post.onrender.com";
 const PUT_URL = "https://microservicio-docentes-put.onrender.com";
 const DELETE_URL = "https://microservicio-docentes-delete.onrender.com";
 
-// Datos que tiene cada docente en PostgreSQL.
+// Datos de cada docente.
 type Docente = {
   id: number;
   nombre: string;
@@ -34,8 +47,7 @@ type Docente = {
   perfil: string;
 };
 
-// Los campos del formulario son los mismos, pero sin el ID.
-// PostgreSQL genera automáticamente el ID al registrar.
+// El formulario no necesita ID.
 type Formulario = Omit<Docente, "id">;
 
 const formularioVacio: Formulario = {
@@ -65,25 +77,19 @@ const campos: { clave: Campo; titulo: string }[] = [
 ];
 
 export default function AdministrarDocentes() {
-  // Lista de docentes que obtenemos mediante GET.
   const [docentes, setDocentes] = useState<Docente[]>([]);
-
-  // Información que escribimos en el formulario.
   const [formulario, setFormulario] = useState<Formulario>({
     ...formularioVacio,
   });
 
-  // ID del docente que estamos editando.
-  // Si es null, registraremos uno nuevo.
   const [idEditar, setIdEditar] = useState<number | null>(null);
-
   const [cargando, setCargando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState("");
   const [busqueda, setBusqueda] = useState("");
   const [idEliminar, setIdEliminar] = useState<number | null>(null);
 
-  // Cambia solamente el campo que estamos escribiendo.
+  // Modificamos solamente el campo que escribe el usuario.
   const cambiarCampo = (campo: Campo, valor: string) => {
     setFormulario((anterior) => ({
       ...anterior,
@@ -91,43 +97,114 @@ export default function AdministrarDocentes() {
     }));
   };
 
-  // GET: consultar todos los docentes.
+  // Consultamos Render y usamos SQLite si falla la conexión.
   const consultarDocentes = async () => {
     setCargando(true);
 
     try {
+      // Antes de descargar datos, intentamos enviar pendientes.
+      if (Platform.OS !== "web") {
+        await sincronizarPendientes();
+      }
+
       const respuesta = await fetch(`${GET_URL}/docentes`);
 
       if (!respuesta.ok) {
         throw new Error("No fue posible consultar los docentes.");
       }
 
-      const datos = await respuesta.json();
+      const datos: Docente[] = await respuesta.json();
 
-      // Nuestro GET debe devolver una lista.
       if (!Array.isArray(datos)) {
         throw new Error("El microservicio no devolvió una lista.");
       }
 
-      setDocentes(datos);
+      if (Platform.OS !== "web") {
+        // Guardamos la información en SQLite.
+        guardarDocentesLocal(datos);
+
+        // Mostramos la copia local para conservar cambios pendientes.
+        const locales = obtenerDocentesLocal() as Docente[];
+        const pendientes = obtenerPendientes();
+
+        const idsEliminados = new Set(
+          pendientes
+            .filter((item) => item.operacion === "DELETE")
+            .map((item) => item.docente_id)
+        );
+
+        setDocentes(
+          locales.filter((item) => !idsEliminados.has(item.id))
+        );
+      } else {
+        setDocentes(datos);
+      }
+
       setMensaje("");
     } catch (error) {
-      setMensaje(
-        error instanceof Error
-          ? error.message
-          : "Error al conectar con el microservicio GET."
-      );
+      if (Platform.OS !== "web") {
+        // Si no hay internet, mostramos lo guardado.
+        try {
+          const locales = obtenerDocentesLocal() as Docente[];
+          const pendientes = obtenerPendientes();
+
+          const idsEliminados = new Set(
+            pendientes
+              .filter((item) => item.operacion === "DELETE")
+              .map((item) => item.docente_id)
+          );
+
+          setDocentes(
+            locales.filter((item) => !idsEliminados.has(item.id))
+          );
+
+          setMensaje("Sin conexión. Mostrando docentes guardados en SQLite.");
+        } catch {
+          setMensaje("No fue posible consultar los docentes locales.");
+        }
+      } else {
+        setMensaje("No fue posible conectar con el microservicio GET.");
+      }
     } finally {
       setCargando(false);
     }
   };
 
-  // Consultamos los docentes al abrir la pantalla.
+  // Al abrir la pantalla consultamos los docentes.
   useEffect(() => {
     consultarDocentes();
   }, []);
 
-  // Limpiamos el formulario para registrar otro docente.
+  // Mientras la pantalla está abierta, intentamos sincronizar
+  // periódicamente cuando haya conexión.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+
+    const intervalo = setInterval(async () => {
+      if (guardando || cargando) return;
+
+      try {
+        const cantidadAntes = obtenerPendientes().length;
+
+        if (cantidadAntes === 0) return;
+
+        await sincronizarPendientes();
+
+        const cantidadDespues = obtenerPendientes().length;
+
+        // Si se enviaron cambios, actualizamos la lista.
+        if (cantidadDespues < cantidadAntes) {
+          await consultarDocentes();
+        }
+      } catch (error) {
+        console.log("Sincronización pendiente.");
+      }
+    }, 20000);
+
+    return () => clearInterval(intervalo);
+  }, [guardando, cargando]);
+
+  // Limpiamos el formulario.
   const nuevoDocente = () => {
     setIdEditar(null);
     setFormulario({ ...formularioVacio });
@@ -135,7 +212,7 @@ export default function AdministrarDocentes() {
     setMensaje("");
   };
 
-  // Colocamos los datos del docente seleccionado en el formulario.
+  // Cargamos los datos del docente para editarlo.
   const editarDocente = (docente: Docente) => {
     setIdEditar(docente.id);
 
@@ -154,8 +231,7 @@ export default function AdministrarDocentes() {
     setMensaje(`Editando a ${docente.nombre}.`);
   };
 
-  // POST: registrar un docente.
-  // PUT: actualizar un docente existente.
+  // Registramos o actualizamos un docente.
   const guardarDocente = async () => {
     if (!formulario.nombre.trim()) {
       setMensaje("Debes escribir el nombre del docente.");
@@ -170,30 +246,98 @@ export default function AdministrarDocentes() {
     setGuardando(true);
     setMensaje("");
 
+    const editando = idEditar !== null;
+
     try {
-      const editando = idEditar !== null;
+      // Si estamos editando un docente temporal, lo guardamos
+      // directamente en SQLite porque todavía no existe en Render.
+      if (
+        Platform.OS !== "web" &&
+        editando &&
+        idEditar !== null &&
+        idEditar < 0
+      ) {
+        actualizarDocenteLocal(idEditar, formulario);
+
+        setDocentes((anteriores) =>
+          anteriores.map((item) =>
+            item.id === idEditar
+              ? { id: idEditar, ...formulario }
+              : item
+          )
+        );
+
+        nuevoDocente();
+        setMensaje("Cambios guardados localmente. Pendientes de sincronizar.");
+        return;
+      }
 
       const url = editando
         ? `${PUT_URL}/docentes/${idEditar}`
         : `${POST_URL}/docentes`;
 
-      const respuesta = await fetch(url, {
-        method: editando ? "PUT" : "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formulario),
-      });
+      let respuesta: Response;
 
+      try {
+        respuesta = await fetch(url, {
+          method: editando ? "PUT" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(formulario),
+        });
+      } catch {
+        // El fetch falló. Guardamos el cambio en SQLite.
+        if (Platform.OS === "web") {
+          throw new Error("Sin conexión con Render.");
+        }
+
+        if (editando && idEditar !== null) {
+          actualizarDocenteLocal(idEditar, formulario);
+
+          setDocentes((anteriores) =>
+            anteriores.map((item) =>
+              item.id === idEditar
+                ? { id: idEditar, ...formulario }
+                : item
+            )
+          );
+
+          setMensaje(
+            "Docente actualizado en SQLite. Pendiente de sincronizar."
+          );
+        } else {
+          const docenteLocal = registrarDocenteLocal(formulario);
+
+          setDocentes((anteriores) => [
+            docenteLocal,
+            ...anteriores,
+          ]);
+
+          setMensaje(
+            "Docente registrado en SQLite. Pendiente de sincronizar."
+          );
+        }
+
+        setIdEditar(null);
+        setFormulario({ ...formularioVacio });
+        return;
+      }
+
+      // Si Render responde con error, lo mostramos.
+      // No lo guardamos como pendiente porque podría ser
+      // un problema de validación, no de conexión.
       const datos = await respuesta.json();
 
       if (!respuesta.ok) {
-        throw new Error(datos.error || "No se pudo guardar el docente.");
+        throw new Error(
+          datos.error || "No se pudo guardar el docente."
+        );
       }
 
-      nuevoDocente();
+      setIdEditar(null);
+      setFormulario({ ...formularioVacio });
 
-      // Actualizamos la lista después de guardar.
       await consultarDocentes();
 
       setMensaje(
@@ -212,29 +356,77 @@ export default function AdministrarDocentes() {
     }
   };
 
-  // DELETE: elimina un docente después de confirmar.
+  // Eliminamos un docente de Render o SQLite.
   const eliminarDocente = async (id: number) => {
     setGuardando(true);
     setMensaje("");
 
     try {
-      const respuesta = await fetch(`${DELETE_URL}/docentes/${id}`, {
-        method: "DELETE",
-      });
+      // Los docentes con ID negativo todavía no están en Render.
+      if (Platform.OS !== "web" && id < 0) {
+        eliminarDocenteLocal(id);
+
+        setDocentes((anteriores) =>
+          anteriores.filter((item) => item.id !== id)
+        );
+
+        if (idEditar === id) {
+          setIdEditar(null);
+          setFormulario({ ...formularioVacio });
+        }
+
+        setIdEliminar(null);
+        setMensaje("Docente local eliminado correctamente.");
+        return;
+      }
+
+      let respuesta: Response;
+
+      try {
+        respuesta = await fetch(
+          `${DELETE_URL}/docentes/${id}`,
+          { method: "DELETE" }
+        );
+      } catch {
+        // Si no hay conexión, eliminamos localmente.
+        if (Platform.OS === "web") {
+          throw new Error("Sin conexión con Render.");
+        }
+
+        eliminarDocenteLocal(id);
+
+        setDocentes((anteriores) =>
+          anteriores.filter((item) => item.id !== id)
+        );
+
+        if (idEditar === id) {
+          setIdEditar(null);
+          setFormulario({ ...formularioVacio });
+        }
+
+        setIdEliminar(null);
+        setMensaje(
+          "Docente eliminado en SQLite. Pendiente de sincronizar."
+        );
+        return;
+      }
 
       const datos = await respuesta.json();
 
       if (!respuesta.ok) {
-        throw new Error(datos.error || "No se pudo eliminar el docente.");
+        throw new Error(
+          datos.error || "No se pudo eliminar el docente."
+        );
       }
 
-      // Si estábamos editando ese docente, limpiamos el formulario.
       if (idEditar === id) {
-        nuevoDocente();
+        setIdEditar(null);
+        setFormulario({ ...formularioVacio });
       }
 
       setIdEliminar(null);
       await consultarDocentes();
+
       setMensaje("Docente eliminado correctamente.");
     } catch (error) {
       setMensaje(
@@ -247,8 +439,7 @@ export default function AdministrarDocentes() {
     }
   };
 
-  // En Android/iOS mostramos una alerta de confirmación.
-  // En Expo Web usamos una confirmación dentro de la pantalla.
+  // Confirmación de eliminación para celular y Web.
   const confirmarEliminacion = (docente: Docente) => {
     if (Platform.OS === "web") {
       setIdEliminar(docente.id);
@@ -271,7 +462,9 @@ export default function AdministrarDocentes() {
 
   // Filtramos los docentes por nombre.
   const docentesFiltrados = docentes.filter((docente) =>
-    docente.nombre.toLowerCase().includes(busqueda.toLowerCase().trim())
+    docente.nombre
+      .toLowerCase()
+      .includes(busqueda.toLowerCase().trim())
   );
 
   return (
@@ -289,11 +482,18 @@ export default function AdministrarDocentes() {
             style={styles.botonVolver}
             onPress={() => router.replace("/docentes")}
           >
-            <FontAwesome name="arrow-left" size={18} color="#FFFFFF" />
+            <FontAwesome
+              name="arrow-left"
+              size={18}
+              color="#FFFFFF"
+            />
           </TouchableOpacity>
 
           <View style={styles.textosEncabezado}>
-            <Text style={styles.titulo}>Administrar docentes</Text>
+            <Text style={styles.titulo}>
+              Administrar docentes
+            </Text>
+
             <Text style={styles.subtitulo}>
               UNINPAHU · Gestión de registros
             </Text>
@@ -303,12 +503,21 @@ export default function AdministrarDocentes() {
         {/* Lista de docentes */}
         <View style={styles.tarjeta}>
           <Text style={styles.tituloSeccion}>
-            <FontAwesome name="users" size={18} color="#2878D0" />
+            <FontAwesome
+              name="users"
+              size={18}
+              color="#2878D0"
+            />
             {"  "}Docentes registrados
           </Text>
 
           <View style={styles.buscador}>
-            <FontAwesome name="search" size={16} color="#2878D0" />
+            <FontAwesome
+              name="search"
+              size={16}
+              color="#2878D0"
+            />
+
             <TextInput
               style={styles.entradaBusqueda}
               placeholder="Filtrar por nombre..."
@@ -323,8 +532,15 @@ export default function AdministrarDocentes() {
             onPress={consultarDocentes}
             disabled={cargando || guardando}
           >
-            <FontAwesome name="refresh" size={15} color="#2878D0" />
-            <Text style={styles.textoSecundario}>Actualizar lista</Text>
+            <FontAwesome
+              name="refresh"
+              size={15}
+              color="#2878D0"
+            />
+
+            <Text style={styles.textoSecundario}>
+              Actualizar lista
+            </Text>
           </TouchableOpacity>
 
           {cargando ? (
@@ -339,14 +555,19 @@ export default function AdministrarDocentes() {
             </Text>
           ) : (
             docentesFiltrados.map((docente) => (
-              <View key={docente.id} style={styles.filaDocente}>
+              <View
+                key={docente.id}
+                style={styles.filaDocente}
+              >
                 <View style={styles.informacionDocente}>
                   <Text style={styles.nombreDocente}>
                     {docente.nombre}
                   </Text>
+
                   <Text style={styles.detalleDocente}>
                     {docente.profesion}
                   </Text>
+
                   <Text style={styles.detalleDocente}>
                     ID: {docente.id}
                   </Text>
@@ -388,7 +609,9 @@ export default function AdministrarDocentes() {
                         style={styles.botonCancelar}
                         onPress={() => setIdEliminar(null)}
                       >
-                        <Text style={styles.textoCancelar}>Cancelar</Text>
+                        <Text style={styles.textoCancelar}>
+                          Cancelar
+                        </Text>
                       </TouchableOpacity>
 
                       <TouchableOpacity
@@ -412,7 +635,11 @@ export default function AdministrarDocentes() {
         <View style={styles.tarjeta}>
           <Text style={styles.tituloSeccion}>
             <FontAwesome
-              name={idEditar === null ? "plus-circle" : "pencil-square-o"}
+              name={
+                idEditar === null
+                  ? "plus-circle"
+                  : "pencil-square-o"
+              }
               size={18}
               color="#2878D0"
             />
@@ -429,8 +656,13 @@ export default function AdministrarDocentes() {
           </Text>
 
           {campos.map((campo) => (
-            <View key={campo.clave} style={styles.grupoCampo}>
-              <Text style={styles.etiqueta}>{campo.titulo}</Text>
+            <View
+              key={campo.clave}
+              style={styles.grupoCampo}
+            >
+              <Text style={styles.etiqueta}>
+                {campo.titulo}
+              </Text>
 
               <TextInput
                 style={[
@@ -459,8 +691,8 @@ export default function AdministrarDocentes() {
                   campo.clave === "correo"
                     ? "email-address"
                     : campo.clave === "imagen"
-                    ? "url"
-                    : "default"
+                      ? "url"
+                      : "default"
                 }
               />
             </View>
@@ -480,6 +712,7 @@ export default function AdministrarDocentes() {
                   size={17}
                   color="#FFFFFF"
                 />
+
                 <Text style={styles.textoPrincipal}>
                   {idEditar === null
                     ? "Registrar docente"
@@ -495,7 +728,12 @@ export default function AdministrarDocentes() {
               onPress={nuevoDocente}
               disabled={guardando}
             >
-              <FontAwesome name="plus" size={15} color="#2878D0" />
+              <FontAwesome
+                name="plus"
+                size={15}
+                color="#2878D0"
+              />
+
               <Text style={styles.textoSecundario}>
                 Cancelar edición / Nuevo docente
               </Text>
@@ -511,7 +749,10 @@ export default function AdministrarDocentes() {
               size={19}
               color="#2878D0"
             />
-            <Text style={styles.mensaje}>{mensaje}</Text>
+
+            <Text style={styles.mensaje}>
+              {mensaje}
+            </Text>
           </View>
         )}
       </ScrollView>
@@ -519,12 +760,13 @@ export default function AdministrarDocentes() {
   );
 }
 
-// Estilos azules de nuestra aplicación.
+// Estilos originales de la aplicación.
 const styles = StyleSheet.create({
   pantalla: {
     flex: 1,
     backgroundColor: "#EAF4FF",
   },
+
   contenedor: {
     width: "100%",
     maxWidth: 650,
@@ -533,11 +775,13 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === "android" ? 55 : 24,
     paddingBottom: 35,
   },
+
   encabezado: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 22,
   },
+
   botonVolver: {
     width: 44,
     height: 44,
@@ -547,19 +791,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 12,
   },
+
   textosEncabezado: {
     flex: 1,
   },
+
   titulo: {
     fontSize: 23,
     fontWeight: "bold",
     color: "#174D8A",
   },
+
   subtitulo: {
     fontSize: 12,
     color: "#56789B",
     marginTop: 4,
   },
+
   tarjeta: {
     backgroundColor: "#FFFFFF",
     borderRadius: 20,
@@ -569,17 +817,20 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     elevation: 2,
   },
+
   tituloSeccion: {
     fontSize: 18,
     fontWeight: "bold",
     color: "#174D8A",
     marginBottom: 12,
   },
+
   descripcion: {
     fontSize: 13,
     color: "#56789B",
     marginBottom: 16,
   },
+
   buscador: {
     flexDirection: "row",
     alignItems: "center",
@@ -590,6 +841,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F6FAFF",
     marginBottom: 12,
   },
+
   entradaBusqueda: {
     flex: 1,
     paddingVertical: 12,
@@ -597,6 +849,7 @@ const styles = StyleSheet.create({
     color: "#234B73",
     fontSize: 14,
   },
+
   botonSecundario: {
     flexDirection: "row",
     alignItems: "center",
@@ -607,20 +860,24 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 8,
   },
+
   textoSecundario: {
     color: "#2878D0",
     fontWeight: "bold",
     marginLeft: 8,
     fontSize: 13,
   },
+
   carga: {
     marginVertical: 25,
   },
+
   textoVacio: {
     color: "#7896B8",
     textAlign: "center",
     marginVertical: 20,
   },
+
   filaDocente: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -629,32 +886,38 @@ const styles = StyleSheet.create({
     borderTopColor: "#E2ECF8",
     paddingVertical: 13,
   },
+
   informacionDocente: {
     flex: 1,
     minWidth: 120,
   },
+
   nombreDocente: {
     fontSize: 15,
     fontWeight: "bold",
     color: "#174D8A",
   },
+
   detalleDocente: {
     fontSize: 12,
     color: "#56789B",
     marginTop: 3,
   },
+
   botonEditar: {
     backgroundColor: "#2878D0",
     padding: 12,
     borderRadius: 10,
     marginLeft: 8,
   },
+
   botonEliminar: {
     backgroundColor: "#D9534F",
     padding: 12,
     borderRadius: 10,
     marginLeft: 8,
   },
+
   confirmacion: {
     width: "100%",
     backgroundColor: "#FFF4F4",
@@ -662,44 +925,53 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 12,
   },
+
   textoConfirmacion: {
     color: "#9C3434",
     fontWeight: "600",
     fontSize: 13,
     marginBottom: 10,
   },
+
   filaBotones: {
     flexDirection: "row",
     justifyContent: "flex-end",
   },
+
   botonCancelar: {
     paddingHorizontal: 14,
     paddingVertical: 10,
     marginRight: 10,
   },
+
   textoCancelar: {
     color: "#56789B",
     fontWeight: "bold",
   },
+
   botonConfirmar: {
     backgroundColor: "#D9534F",
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 9,
   },
+
   textoConfirmar: {
     color: "#FFFFFF",
     fontWeight: "bold",
   },
+
   grupoCampo: {
     marginBottom: 14,
   },
+
   etiqueta: {
     fontSize: 13,
     fontWeight: "bold",
     color: "#174D8A",
     marginBottom: 7,
   },
+
   entrada: {
     borderWidth: 1,
     borderColor: "#D2E5FA",
@@ -710,10 +982,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#234B73",
   },
+
   entradaGrande: {
     minHeight: 85,
     textAlignVertical: "top",
   },
+
   botonPrincipal: {
     backgroundColor: "#2878D0",
     borderRadius: 13,
@@ -723,12 +997,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 10,
   },
+
   textoPrincipal: {
     color: "#FFFFFF",
     fontWeight: "bold",
     fontSize: 15,
     marginLeft: 10,
   },
+
   cajaMensaje: {
     flexDirection: "row",
     alignItems: "center",
@@ -739,6 +1015,7 @@ const styles = StyleSheet.create({
     padding: 15,
     marginBottom: 15,
   },
+
   mensaje: {
     flex: 1,
     marginLeft: 10,
