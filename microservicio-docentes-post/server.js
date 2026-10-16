@@ -1,14 +1,13 @@
-
 const http = require("node:http");
 const { Buffer } = require("node:buffer");
 const fs = require("node:fs");
 const path = require("node:path");
 const { Pool } = require("pg");
 
-// Puerto del microservicio POST
+// Puerto de nuestro microservicio POST.
 const PORT = process.env.PORT || 3003;
 
-// Conexion a PostgreSQL de Railway
+// Conectamos nuestro microservicio con PostgreSQL de Railway.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL?.includes("proxy.rlwy.net")
@@ -16,7 +15,7 @@ const pool = new Pool({
     : undefined,
 });
 
-// Funcion para enviar respuestas JSON
+// Esta función nos ayuda a enviar respuestas en formato JSON.
 function responder(res, codigo, datos) {
   res.writeHead(codigo, {
     "Content-Type": "application/json; charset=utf-8",
@@ -28,7 +27,7 @@ function responder(res, codigo, datos) {
   res.end(JSON.stringify(datos));
 }
 
-// Funcion para mostrar la pagina de Swagger
+// Aquí mostramos la página de Swagger.
 function mostrarSwagger(res) {
   const html = `
     <!DOCTYPE html>
@@ -64,7 +63,7 @@ function mostrarSwagger(res) {
   res.end(html);
 }
 
-// Funcion para recibir datos JSON
+// Esta función recibe los datos JSON que envía la aplicación.
 async function recibirJSON(req) {
   const partes = [];
   let tamano = 0;
@@ -72,7 +71,7 @@ async function recibirJSON(req) {
   for await (const parte of req) {
     tamano += parte.length;
 
-    // Limitamos el tamaño de los datos recibidos
+    // Evitamos recibir datos demasiado grandes.
     if (tamano > 100000) {
       const error = new Error("Datos demasiado grandes");
       error.codigo = 413;
@@ -83,7 +82,7 @@ async function recibirJSON(req) {
   }
 
   try {
-    // Convertimos los datos recibidos a JSON
+    // Convertimos los datos recibidos a JSON.
     const texto = Buffer.concat(partes).toString("utf8");
     return JSON.parse(texto);
   } catch {
@@ -93,12 +92,12 @@ async function recibirJSON(req) {
   }
 }
 
-// Creamos el servidor sin Express
+// Creamos nuestro servidor usando Node.js, sin Express.
 const servidor = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const ruta = url.pathname;
 
-  // Permitimos solicitudes desde Expo Web
+  // Permitimos las solicitudes desde Expo Web.
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
@@ -109,7 +108,7 @@ const servidor = http.createServer(async (req, res) => {
     return res.end();
   }
 
-  // Ruta principal para comprobar el servidor
+  // Comprobamos que nuestro microservicio funciona.
   if (ruta === "/" && req.method === "GET") {
     return responder(res, 200, {
       mensaje: "Microservicio POST funcionando correctamente",
@@ -117,7 +116,7 @@ const servidor = http.createServer(async (req, res) => {
     });
   }
 
-  // Mostramos Swagger
+  // Mostramos Swagger.
   if (
     (ruta === "/api-docs" || ruta === "/api-docs/") &&
     req.method === "GET"
@@ -125,7 +124,7 @@ const servidor = http.createServer(async (req, res) => {
     return mostrarSwagger(res);
   }
 
-  // Mostramos el archivo de documentacion
+  // Mostramos la documentación del microservicio.
   if (ruta === "/openapi.json" && req.method === "GET") {
     try {
       const archivo = path.join(process.cwd(), "swagger.json");
@@ -143,12 +142,12 @@ const servidor = http.createServer(async (req, res) => {
     }
   }
 
-  // Ruta POST para registrar docentes
+  // Esta ruta nos permite registrar docentes.
   if (ruta === "/docentes" && req.method === "POST") {
     try {
       const docente = await recibirJSON(req);
 
-      // Comprobamos que se haya enviado un objeto
+      // Revisamos que los datos sean un objeto JSON.
       if (
         !docente ||
         typeof docente !== "object" ||
@@ -159,7 +158,7 @@ const servidor = http.createServer(async (req, res) => {
         });
       }
 
-      // Campos de nuestra tabla docentes
+      // Estos son los campos de nuestros docentes.
       const campos = [
         "nombre",
         "imagen",
@@ -172,7 +171,7 @@ const servidor = http.createServer(async (req, res) => {
         "perfil",
       ];
 
-      // Nombre y correo son obligatorios
+      // El nombre y el correo son obligatorios.
       if (
         typeof docente.nombre !== "string" ||
         !docente.nombre.trim() ||
@@ -184,7 +183,7 @@ const servidor = http.createServer(async (req, res) => {
         });
       }
 
-      // Comprobamos que los datos sean textos
+      // Comprobamos que todos los campos sean textos.
       for (const campo of campos) {
         if (
           docente[campo] !== undefined &&
@@ -197,7 +196,7 @@ const servidor = http.createServer(async (req, res) => {
         }
       }
 
-      // Organizamos los valores para PostgreSQL
+      // Organizamos los datos antes de enviarlos a PostgreSQL.
       const valores = campos.map((campo) => {
         const valor = docente[campo];
 
@@ -206,7 +205,7 @@ const servidor = http.createServer(async (req, res) => {
           : null;
       });
 
-      // Insertamos el nuevo docente
+      // Registramos el docente en PostgreSQL.
       const resultado = await pool.query(
         `INSERT INTO docentes
         (nombre, imagen, profesion, facultad, materias,
@@ -216,13 +215,21 @@ const servidor = http.createServer(async (req, res) => {
         valores
       );
 
-      // Respondemos con el docente creado
+      // Si todo salió bien, devolvemos el docente registrado.
       return responder(res, 201, {
         mensaje: "Docente registrado correctamente",
         docente: resultado.rows[0],
       });
 
     } catch (error) {
+      // Si el correo ya existe, PostgreSQL nos avisa con este código.
+      if (error.code === "23505") {
+        return responder(res, 409, {
+          error: "Ya existe un docente registrado con ese correo.",
+        });
+      }
+
+      // Si ocurre otro error, lo mostramos en la consola.
       console.error("Error POST:", error.message);
 
       return responder(res, error.codigo || 500, {
@@ -233,20 +240,20 @@ const servidor = http.createServer(async (req, res) => {
     }
   }
 
-  // Metodo no permitido
+  // Si intentan usar otro método en esta ruta, lo rechazamos.
   if (ruta === "/docentes") {
     return responder(res, 405, {
       error: "Metodo no permitido",
     });
   }
 
-  // Ruta no encontrada
+  // Si la ruta no existe, mostramos este mensaje.
   return responder(res, 404, {
     error: "Ruta no encontrada",
   });
 });
 
-// Iniciamos el servidor
+// Aquí iniciamos nuestro microservicio.
 servidor.listen(PORT, "0.0.0.0", () => {
   console.log(`Microservicio POST funcionando en puerto ${PORT}`);
 });
