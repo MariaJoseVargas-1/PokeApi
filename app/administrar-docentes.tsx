@@ -1,6 +1,6 @@
 import { FontAwesome } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -15,14 +15,19 @@ import {
   View,
 } from "react-native";
 
-// Funciones para trabajar sin conexión en Expo Go.
+// Funciones para trabajar con SQLite en Expo Go.
 import {
   actualizarDocenteLocal,
   eliminarDocenteLocal,
   guardarDocentesLocal,
+  normalizarCorreo,
+  obtenerConflictosPendientes,
   obtenerDocentesLocal,
+  obtenerIdsDocentesNuevos,
   obtenerPendientes,
   registrarDocenteLocal,
+  resolverConflictoDocente,
+  type ConflictoDocente,
 } from "../database_sqlite/database";
 
 import { sincronizarPendientes } from "../database_sqlite/sincronizar";
@@ -78,6 +83,7 @@ const campos: { clave: Campo; titulo: string }[] = [
 
 export default function AdministrarDocentes() {
   const [docentes, setDocentes] = useState<Docente[]>([]);
+
   const [formulario, setFormulario] = useState<Formulario>({
     ...formularioVacio,
   });
@@ -89,7 +95,37 @@ export default function AdministrarDocentes() {
   const [busqueda, setBusqueda] = useState("");
   const [idEliminar, setIdEliminar] = useState<number | null>(null);
 
-  // Modificamos solamente el campo que escribe el usuario.
+  // El usuario puede elegir cada cuánto consultar Render.
+  const [intervalo, setIntervalo] = useState<2 | 10 | 30>(10);
+
+  // Guardamos los IDs que tienen la marca NUEVO.
+  const [idsNuevos, setIdsNuevos] = useState<number[]>([]);
+
+  // Conflictos entre docentes offline y docentes de PostgreSQL.
+  const [conflictos, setConflictos] = useState<ConflictoDocente[]>([]);
+
+  // Evitamos que se acumulen consultas simultáneas.
+  const consultandoRef = useRef(false);
+
+  // Evitamos consultar mientras registramos o eliminamos.
+  const guardandoRef = useRef(false);
+
+  // Controlamos la primera consulta en Expo Web.
+  const primeraConsultaWebRef = useRef(false);
+
+  // IDs que ya conocemos en Expo Web.
+  const idsConocidosWebRef = useRef<Set<number>>(new Set());
+
+  // IDs nuevos detectados en Expo Web.
+  const idsNuevosWebRef = useRef<Set<number>>(new Set());
+
+  // Conflictos que el usuario decidió dejar pendientes por ahora.
+  const conflictosOcultosRef = useRef<Set<number>>(new Set());
+
+  // Nos ayuda a evitar actualizaciones después de salir de la pantalla.
+  const pantallaActivaRef = useRef(true);
+
+  // Actualizamos solamente el campo que escribe el usuario.
   const cambiarCampo = (campo: Campo, valor: string) => {
     setFormulario((anterior) => ({
       ...anterior,
@@ -97,12 +133,37 @@ export default function AdministrarDocentes() {
     }));
   };
 
+  // Mostramos los docentes locales sin incluir DELETE pendientes.
+  const cargarDocentesLocales = () => {
+    const locales = obtenerDocentesLocal() as Docente[];
+    const pendientes = obtenerPendientes();
+
+    const idsEliminados = new Set(
+      pendientes
+        .filter((item) => item.operacion === "DELETE")
+        .map((item) => item.docente_id)
+    );
+
+    return locales.filter(
+      (docente) => !idsEliminados.has(docente.id)
+    );
+  };
+
   // Consultamos Render y usamos SQLite si falla la conexión.
-  const consultarDocentes = async () => {
-    setCargando(true);
+  // mostrarCarga es false durante las actualizaciones automáticas.
+  const consultarDocentes = async (mostrarCarga = false) => {
+    if (consultandoRef.current || guardandoRef.current) {
+      return;
+    }
+
+    consultandoRef.current = true;
+
+    if (mostrarCarga && pantallaActivaRef.current) {
+      setCargando(true);
+    }
 
     try {
-      // Antes de descargar datos, intentamos enviar pendientes.
+      // Primero intentamos sincronizar los cambios offline.
       if (Platform.OS !== "web") {
         await sincronizarPendientes();
       }
@@ -119,90 +180,159 @@ export default function AdministrarDocentes() {
         throw new Error("El microservicio no devolvió una lista.");
       }
 
+      if (!pantallaActivaRef.current) {
+        return;
+      }
+
       if (Platform.OS !== "web") {
-        // Guardamos la información en SQLite.
+        // Detectamos conflictos usando la lista completa de PostgreSQL.
+        const conflictosEncontrados =
+          obtenerConflictosPendientes(datos);
+
+        // Dejamos visibles los conflictos que aún necesitan decisión.
+        setConflictos(
+          conflictosEncontrados.filter(
+            (conflicto) =>
+              !conflictosOcultosRef.current.has(
+                conflicto.pendienteId
+              )
+          )
+        );
+
+        // Guardamos los docentes recibidos en SQLite.
         guardarDocentesLocal(datos);
 
-        // Mostramos la copia local para conservar cambios pendientes.
-        const locales = obtenerDocentesLocal() as Docente[];
-        const pendientes = obtenerPendientes();
+        // Recuperamos los docentes locales y sus cambios pendientes.
+        const locales = cargarDocentesLocales();
 
-        const idsEliminados = new Set(
-          pendientes
-            .filter((item) => item.operacion === "DELETE")
-            .map((item) => item.docente_id)
+        // Si un correo está duplicado, mostramos la versión
+        // de PostgreSQL, pero conservamos la local en SQLite.
+        const correosNube = new Set(
+          datos
+            .map((docente) => normalizarCorreo(docente.correo))
+            .filter((correo) => correo !== "")
         );
 
-        setDocentes(
-          locales.filter((item) => !idsEliminados.has(item.id))
-        );
+        const docentesVisibles = locales.filter((docente) => {
+          if (docente.id >= 0) {
+            return true;
+          }
+
+          // Ocultamos solamente la copia temporal duplicada.
+          return !correosNube.has(
+            normalizarCorreo(docente.correo)
+          );
+        });
+
+        setDocentes(docentesVisibles);
+
+        // Consultamos los docentes que SQLite marcó como nuevos.
+        setIdsNuevos(obtenerIdsDocentesNuevos());
       } else {
+        // En Web no hay SQLite. Recordamos los IDs en memoria.
+        if (!primeraConsultaWebRef.current) {
+          // La primera consulta es nuestra lista inicial.
+          datos.forEach((docente) => {
+            idsConocidosWebRef.current.add(docente.id);
+          });
+
+          primeraConsultaWebRef.current = true;
+        } else {
+          // Las siguientes consultas detectan registros nuevos.
+          datos.forEach((docente) => {
+            if (!idsConocidosWebRef.current.has(docente.id)) {
+              idsNuevosWebRef.current.add(docente.id);
+            }
+
+            idsConocidosWebRef.current.add(docente.id);
+          });
+        }
+
+        // Si un registro ya no existe, quitamos su marca.
+        const idsActuales = new Set(
+          datos.map((docente) => docente.id)
+        );
+
+        idsNuevosWebRef.current.forEach((id) => {
+          if (!idsActuales.has(id)) {
+            idsNuevosWebRef.current.delete(id);
+          }
+        });
+
+        setIdsNuevos(Array.from(idsNuevosWebRef.current));
         setDocentes(datos);
+        setConflictos([]);
       }
 
-      setMensaje("");
+      // Limpiamos los mensajes de conexión anteriores.
+      setMensaje((anterior) =>
+        anterior.startsWith("Sin conexión.") ||
+        anterior.startsWith("No fue posible conectar")
+          ? ""
+          : anterior
+      );
     } catch (error) {
+      if (!pantallaActivaRef.current) {
+        return;
+      }
+
       if (Platform.OS !== "web") {
-        // Si no hay internet, mostramos lo guardado.
+        // Si no hay internet, seguimos mostrando SQLite.
         try {
-          const locales = obtenerDocentesLocal() as Docente[];
-          const pendientes = obtenerPendientes();
+          setDocentes(cargarDocentesLocales());
+          setIdsNuevos(obtenerIdsDocentesNuevos());
 
-          const idsEliminados = new Set(
-            pendientes
-              .filter((item) => item.operacion === "DELETE")
-              .map((item) => item.docente_id)
+          // Conservamos los conflictos ya detectados.
+          setMensaje(
+            "Sin conexión. Mostrando docentes guardados en SQLite."
           );
-
-          setDocentes(
-            locales.filter((item) => !idsEliminados.has(item.id))
-          );
-
-          setMensaje("Sin conexión. Mostrando docentes guardados en SQLite.");
         } catch {
-          setMensaje("No fue posible consultar los docentes locales.");
+          setMensaje(
+            "No fue posible consultar los docentes locales."
+          );
         }
       } else {
-        setMensaje("No fue posible conectar con el microservicio GET.");
+        setMensaje(
+          "No fue posible conectar con el microservicio GET."
+        );
       }
     } finally {
-      setCargando(false);
+      consultandoRef.current = false;
+
+      if (pantallaActivaRef.current && mostrarCarga) {
+        setCargando(false);
+      }
     }
   };
 
   // Al abrir la pantalla consultamos los docentes.
   useEffect(() => {
-    consultarDocentes();
+    pantallaActivaRef.current = true;
+
+    void consultarDocentes(true);
+
+    return () => {
+      pantallaActivaRef.current = false;
+    };
   }, []);
 
-  // Mientras la pantalla está abierta, intentamos sincronizar
-  // periódicamente cuando haya conexión.
+  // Consultamos automáticamente cada 2, 10 o 30 segundos.
   useEffect(() => {
-    if (Platform.OS === "web") return;
-
-    const intervalo = setInterval(async () => {
-      if (guardando || cargando) return;
-
-      try {
-        const cantidadAntes = obtenerPendientes().length;
-
-        if (cantidadAntes === 0) return;
-
-        await sincronizarPendientes();
-
-        const cantidadDespues = obtenerPendientes().length;
-
-        // Si se enviaron cambios, actualizamos la lista.
-        if (cantidadDespues < cantidadAntes) {
-          await consultarDocentes();
-        }
-      } catch (error) {
-        console.log("Sincronización pendiente.");
+    const temporizador = setInterval(() => {
+      if (
+        !pantallaActivaRef.current ||
+        guardandoRef.current ||
+        consultandoRef.current
+      ) {
+        return;
       }
-    }, 20000);
 
-    return () => clearInterval(intervalo);
-  }, [guardando, cargando]);
+      // La consulta se hace sin mostrar el indicador de carga.
+      void consultarDocentes(false);
+    }, intervalo * 1000);
+
+    return () => clearInterval(temporizador);
+  }, [intervalo]);
 
   // Limpiamos el formulario.
   const nuevoDocente = () => {
@@ -243,14 +373,14 @@ export default function AdministrarDocentes() {
       return;
     }
 
+    guardandoRef.current = true;
     setGuardando(true);
     setMensaje("");
 
     const editando = idEditar !== null;
 
     try {
-      // Si estamos editando un docente temporal, lo guardamos
-      // directamente en SQLite porque todavía no existe en Render.
+      // Si editamos un docente temporal, modificamos su POST local.
       if (
         Platform.OS !== "web" &&
         editando &&
@@ -268,7 +398,11 @@ export default function AdministrarDocentes() {
         );
 
         nuevoDocente();
-        setMensaje("Cambios guardados localmente. Pendientes de sincronizar.");
+
+        setMensaje(
+          "Cambios guardados localmente. Pendientes de sincronizar."
+        );
+
         return;
       }
 
@@ -325,8 +459,6 @@ export default function AdministrarDocentes() {
       }
 
       // Si Render responde con error, lo mostramos.
-      // No lo guardamos como pendiente porque podría ser
-      // un problema de validación, no de conexión.
       const datos = await respuesta.json();
 
       if (!respuesta.ok) {
@@ -335,10 +467,18 @@ export default function AdministrarDocentes() {
         );
       }
 
+      // En Web, el registro propio no debe contarse como
+      // una inserción externa detectada por el temporizador.
+      if (Platform.OS === "web" && !editando) {
+        const idRegistrado = Number(datos?.docente?.id);
+
+        if (Number.isSafeInteger(idRegistrado)) {
+          idsConocidosWebRef.current.add(idRegistrado);
+        }
+      }
+
       setIdEditar(null);
       setFormulario({ ...formularioVacio });
-
-      await consultarDocentes();
 
       setMensaje(
         editando
@@ -352,12 +492,17 @@ export default function AdministrarDocentes() {
           : "Error al guardar el docente."
       );
     } finally {
+      guardandoRef.current = false;
       setGuardando(false);
+
+      // Actualizamos la lista al terminar.
+      void consultarDocentes(false);
     }
   };
 
   // Eliminamos un docente de Render o SQLite.
   const eliminarDocente = async (id: number) => {
+    guardandoRef.current = true;
     setGuardando(true);
     setMensaje("");
 
@@ -405,9 +550,11 @@ export default function AdministrarDocentes() {
         }
 
         setIdEliminar(null);
+
         setMensaje(
           "Docente eliminado en SQLite. Pendiente de sincronizar."
         );
+
         return;
       }
 
@@ -425,8 +572,6 @@ export default function AdministrarDocentes() {
       }
 
       setIdEliminar(null);
-      await consultarDocentes();
-
       setMensaje("Docente eliminado correctamente.");
     } catch (error) {
       setMensaje(
@@ -435,7 +580,10 @@ export default function AdministrarDocentes() {
           : "Error al eliminar el docente."
       );
     } finally {
+      guardandoRef.current = false;
       setGuardando(false);
+
+      void consultarDocentes(false);
     }
   };
 
@@ -460,12 +608,98 @@ export default function AdministrarDocentes() {
     );
   };
 
+  // Resolvemos un conflicto cuando el usuario acepta la nube.
+  const aceptarDatosNube = async (conflicto: ConflictoDocente) => {
+    if (guardandoRef.current || consultandoRef.current) {
+      setMensaje("Espera a que termine la consulta actual.");
+      return;
+    }
+
+    guardandoRef.current = true;
+    setGuardando(true);
+
+    try {
+      // Confirmamos que el docente todavía existe en PostgreSQL.
+      const respuesta = await fetch(`${GET_URL}/docentes`);
+
+      if (!respuesta.ok) {
+        throw new Error(
+          "No se pudo verificar el docente en PostgreSQL."
+        );
+      }
+
+      const docentesNube: Docente[] = await respuesta.json();
+
+      if (!Array.isArray(docentesNube)) {
+        throw new Error("La respuesta de Render no es válida.");
+      }
+
+      const docenteActual = docentesNube.find(
+        (docente) =>
+          normalizarCorreo(docente.correo) ===
+          normalizarCorreo(conflicto.local.correo)
+      );
+
+      if (!docenteActual) {
+        throw new Error(
+          "El docente ya no aparece en PostgreSQL. Actualiza la lista."
+        );
+      }
+
+      // SQLite elimina el POST temporal y guarda la versión nube.
+      resolverConflictoDocente(
+        conflicto.pendienteId,
+        docenteActual
+      );
+
+      setConflictos((anteriores) =>
+        anteriores.filter(
+          (item) => item.pendienteId !== conflicto.pendienteId
+        )
+      );
+
+      conflictosOcultosRef.current.delete(conflicto.pendienteId);
+
+      setMensaje(
+        `Conflicto resuelto: se conservaron los datos de PostgreSQL para ${docenteActual.nombre}.`
+      );
+    } catch (error) {
+      setMensaje(
+        error instanceof Error
+          ? error.message
+          : "No fue posible resolver el conflicto."
+      );
+    } finally {
+      guardandoRef.current = false;
+      setGuardando(false);
+
+      void consultarDocentes(false);
+    }
+  };
+
+  // Dejamos el registro offline pendiente sin eliminarlo.
+  const conservarConflicto = (conflicto: ConflictoDocente) => {
+    conflictosOcultosRef.current.add(conflicto.pendienteId);
+
+    setConflictos((anteriores) =>
+      anteriores.filter(
+        (item) => item.pendienteId !== conflicto.pendienteId
+      )
+    );
+
+    setMensaje(
+      `El registro offline de ${conflicto.local.nombre} sigue guardado en SQLite. No se enviará ni eliminará mientras exista el conflicto.`
+    );
+  };
+
   // Filtramos los docentes por nombre.
   const docentesFiltrados = docentes.filter((docente) =>
     docente.nombre
       .toLowerCase()
       .includes(busqueda.toLowerCase().trim())
   );
+
+  const cantidadNuevos = idsNuevos.length;
 
   return (
     <KeyboardAvoidingView
@@ -500,6 +734,138 @@ export default function AdministrarDocentes() {
           </View>
         </View>
 
+        {/* Configuración de actualización automática */}
+        <View style={styles.tarjeta}>
+          <Text style={styles.tituloSeccion}>
+            <FontAwesome
+              name="refresh"
+              size={18}
+              color="#2878D0"
+            />
+            {"  "}Sincronización automática
+          </Text>
+
+          <Text style={styles.descripcion}>
+            Elige cada cuántos segundos consultar los docentes
+            registrados en PostgreSQL.
+          </Text>
+
+          <View style={styles.opcionesIntervalo}>
+            {([2, 10, 30] as const).map((segundos) => (
+              <TouchableOpacity
+                key={segundos}
+                style={[
+                  styles.botonIntervalo,
+                  intervalo === segundos &&
+                    styles.botonIntervaloActivo,
+                ]}
+                onPress={() => setIntervalo(segundos)}
+              >
+                <Text
+                  style={[
+                    styles.textoIntervalo,
+                    intervalo === segundos &&
+                      styles.textoIntervaloActivo,
+                  ]}
+                >
+                  {segundos} s
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={styles.textoAyuda}>
+            Actualización configurada: cada {intervalo} segundos.
+          </Text>
+
+          {/* Contador de docentes nuevos */}
+          <View style={styles.contenedorNovedades}>
+            <FontAwesome
+              name="bell"
+              size={18}
+              color="#2878D0"
+            />
+
+            <Text style={styles.textoNovedades}>
+              {cantidadNuevos === 0
+                ? "No hay docentes nuevos detectados"
+                : `${cantidadNuevos} ${
+                    cantidadNuevos === 1
+                      ? "docente nuevo"
+                      : "docentes nuevos"
+                  }`}
+            </Text>
+          </View>
+        </View>
+
+        {/* Avisos de conflictos pendientes */}
+        {conflictos.length > 0 && (
+          <View style={styles.tarjeta}>
+            <Text style={styles.tituloSeccion}>
+              <FontAwesome
+                name="exclamation-triangle"
+                size={18}
+                color="#D48A19"
+              />
+              {"  "}Conflictos de sincronización
+            </Text>
+
+            <Text style={styles.descripcion}>
+              Encontramos docentes creados sin internet cuyo correo
+              ya existe en PostgreSQL. Revisa cada caso antes de
+              descartar los datos locales.
+            </Text>
+
+            {conflictos.map((conflicto) => (
+              <View
+                key={conflicto.pendienteId}
+                style={styles.tarjetaConflicto}
+              >
+                <Text style={styles.nombreConflicto}>
+                  {conflicto.local.nombre}
+                </Text>
+
+                <Text style={styles.detalleDocente}>
+                  Correo: {conflicto.local.correo}
+                </Text>
+
+                <Text style={styles.detalleDocente}>
+                  Versión offline: {conflicto.local.profesion}
+                </Text>
+
+                <Text style={styles.detalleDocente}>
+                  Versión PostgreSQL: {conflicto.nube.profesion}
+                </Text>
+
+                <Text style={styles.advertenciaConflicto}>
+                  Si eliges PostgreSQL, se descartarán los cambios
+                  de este registro temporal guardado offline.
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.botonResolver}
+                  disabled={guardando}
+                  onPress={() => aceptarDatosNube(conflicto)}
+                >
+                  <Text style={styles.textoBotonResolver}>
+                    Usar datos de PostgreSQL
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.botonConservar}
+                  disabled={guardando}
+                  onPress={() => conservarConflicto(conflicto)}
+                >
+                  <Text style={styles.textoBotonConservar}>
+                    Conservar pendiente
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* Lista de docentes */}
         <View style={styles.tarjeta}>
           <Text style={styles.tituloSeccion}>
@@ -529,7 +895,7 @@ export default function AdministrarDocentes() {
 
           <TouchableOpacity
             style={styles.botonSecundario}
-            onPress={consultarDocentes}
+            onPress={() => consultarDocentes(true)}
             disabled={cargando || guardando}
           >
             <FontAwesome
@@ -560,9 +926,19 @@ export default function AdministrarDocentes() {
                 style={styles.filaDocente}
               >
                 <View style={styles.informacionDocente}>
-                  <Text style={styles.nombreDocente}>
-                    {docente.nombre}
-                  </Text>
+                  <View style={styles.filaNombre}>
+                    <Text style={styles.nombreDocente}>
+                      {docente.nombre}
+                    </Text>
+
+                    {idsNuevos.includes(docente.id) && (
+                      <View style={styles.etiquetaNuevo}>
+                        <Text style={styles.textoNuevo}>
+                          NUEVO
+                        </Text>
+                      </View>
+                    )}
+                  </View>
 
                   <Text style={styles.detalleDocente}>
                     {docente.profesion}
@@ -760,7 +1136,7 @@ export default function AdministrarDocentes() {
   );
 }
 
-// Estilos originales de la aplicación.
+// Estilos originales de la aplicación y los nuevos indicadores.
 const styles = StyleSheet.create({
   pantalla: {
     flex: 1,
@@ -1020,6 +1396,137 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 10,
     color: "#56789B",
+    fontSize: 13,
+  },
+
+  // Botones para elegir el intervalo.
+  opcionesIntervalo: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+
+  botonIntervalo: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#2878D0",
+    alignItems: "center",
+    marginHorizontal: 4,
+    backgroundColor: "#FFFFFF",
+  },
+
+  botonIntervaloActivo: {
+    backgroundColor: "#2878D0",
+  },
+
+  textoIntervalo: {
+    color: "#2878D0",
+    fontWeight: "bold",
+    fontSize: 14,
+  },
+
+  textoIntervaloActivo: {
+    color: "#FFFFFF",
+  },
+
+  textoAyuda: {
+    color: "#56789B",
+    fontSize: 12,
+    textAlign: "center",
+    marginBottom: 15,
+  },
+
+  // Contador de registros nuevos.
+  contenedorNovedades: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EAF4FF",
+    padding: 13,
+    borderRadius: 12,
+  },
+
+  textoNovedades: {
+    color: "#174D8A",
+    fontWeight: "bold",
+    fontSize: 13,
+    marginLeft: 10,
+    flex: 1,
+  },
+
+  // Etiqueta NUEVO junto al nombre.
+  filaNombre: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+
+  etiquetaNuevo: {
+    backgroundColor: "#DDF4E6",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 7,
+    marginLeft: 8,
+    marginVertical: 3,
+  },
+
+  textoNuevo: {
+    color: "#207B49",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+
+  // Avisos de conflictos.
+  tarjetaConflicto: {
+    backgroundColor: "#FFF9EC",
+    borderWidth: 1,
+    borderColor: "#F1D8A3",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+
+  nombreConflicto: {
+    fontSize: 15,
+    fontWeight: "bold",
+    color: "#174D8A",
+    marginBottom: 6,
+  },
+
+  advertenciaConflicto: {
+    color: "#93631A",
+    fontSize: 12,
+    marginTop: 12,
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+
+  botonResolver: {
+    backgroundColor: "#2878D0",
+    borderRadius: 10,
+    padding: 12,
+    alignItems: "center",
+    marginBottom: 8,
+  },
+
+  textoBotonResolver: {
+    color: "#FFFFFF",
+    fontWeight: "bold",
+    fontSize: 13,
+  },
+
+  botonConservar: {
+    borderWidth: 1,
+    borderColor: "#2878D0",
+    borderRadius: 10,
+    padding: 12,
+    alignItems: "center",
+  },
+
+  textoBotonConservar: {
+    color: "#2878D0",
+    fontWeight: "bold",
     fontSize: 13,
   },
 });
