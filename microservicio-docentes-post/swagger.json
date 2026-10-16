@@ -1,4 +1,3 @@
-
 {
   "openapi": "3.0.3",
   "info": {
@@ -32,6 +31,22 @@
           },
           "400": {
             "description": "Datos invalidos"
+          },
+          "409": {
+            "description": "Ya existe un docente registrado con ese correo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Ya existe un docente registrado con ese correo."
+                    }
+                  }
+                }
+              }
+            }
           },
           "500": {
             "description": "Error del servidor"
