@@ -134,6 +134,8 @@ export default function AdministrarDocentes() {
   };
 
   // Mostramos los docentes locales sin incluir DELETE pendientes.
+  // Si hay dos versiones con el mismo correo, priorizamos el POST
+  // offline pendiente y conservamos la versión de nube en SQLite.
   const cargarDocentesLocales = () => {
     const locales = obtenerDocentesLocal() as Docente[];
     const pendientes = obtenerPendientes();
@@ -144,9 +146,31 @@ export default function AdministrarDocentes() {
         .map((item) => item.docente_id)
     );
 
-    return locales.filter(
+    const idsPostPendientes = new Set(
+      pendientes
+        .filter((item) => item.operacion === "POST")
+        .map((item) => item.docente_id)
+    );
+
+    const visibles = locales.filter(
       (docente) => !idsEliminados.has(docente.id)
     );
+
+    const correosPendientes = new Set(
+      visibles
+        .filter((docente) => idsPostPendientes.has(docente.id))
+        .map((docente) => normalizarCorreo(docente.correo))
+        .filter((correo) => correo !== "")
+    );
+
+    return visibles.filter((docente) => {
+      const correo = normalizarCorreo(docente.correo);
+      return (
+        idsPostPendientes.has(docente.id) ||
+        !correo ||
+        !correosPendientes.has(correo)
+      );
+    });
   };
 
   // Consultamos Render y usamos SQLite si falla la conexión.
@@ -205,26 +229,10 @@ export default function AdministrarDocentes() {
         // Recuperamos los docentes locales y sus cambios pendientes.
         const locales = cargarDocentesLocales();
 
-        // Si un correo está duplicado, mostramos la versión
-        // de PostgreSQL, pero conservamos la local en SQLite.
-        const correosNube = new Set(
-          datos
-            .map((docente) => normalizarCorreo(docente.correo))
-            .filter((correo) => correo !== "")
-        );
-
-        const docentesVisibles = locales.filter((docente) => {
-          if (docente.id >= 0) {
-            return true;
-          }
-
-          // Ocultamos solamente la copia temporal duplicada.
-          return !correosNube.has(
-            normalizarCorreo(docente.correo)
-          );
-        });
-
-        setDocentes(docentesVisibles);
+        // La lista local ya prioriza el registro offline pendiente
+        // y oculta su copia de PostgreSQL si comparten correo.
+        // Así el docente no aparece duplicado con o sin internet.
+        setDocentes(locales);
 
         // Consultamos los docentes que SQLite marcó como nuevos.
         setIdsNuevos(obtenerIdsDocentesNuevos());
@@ -677,7 +685,118 @@ export default function AdministrarDocentes() {
     }
   };
 
+  // Si elegimos SQLite, actualizamos el registro que YA existe en
+  // PostgreSQL. Nunca enviamos un POST nuevo para este conflicto.
+  const aceptarDatosSQLite = async (conflicto: ConflictoDocente) => {
+    if (guardandoRef.current || consultandoRef.current) {
+      setMensaje("Espera a que termine la consulta actual.");
+      return;
+    }
+
+    guardandoRef.current = true;
+    setGuardando(true);
+    setMensaje("");
+
+    try {
+      // Revalidamos el conflicto para no usar datos antiguos.
+      const respuesta = await fetch(`${GET_URL}/docentes`);
+      if (!respuesta.ok) {
+        throw new Error("No se pudo consultar PostgreSQL.");
+      }
+
+      const datosNube: Docente[] = await respuesta.json();
+      if (!Array.isArray(datosNube)) {
+        throw new Error("PostgreSQL no devolvió una lista válida.");
+      }
+
+      const actual = obtenerConflictosPendientes(datosNube).find(
+        (item) => item.pendienteId === conflicto.pendienteId
+      );
+
+      if (!actual) {
+        throw new Error(
+          "El conflicto cambió o ya fue resuelto. Actualiza la lista."
+        );
+      }
+
+      const { id: idTemporal, ...datosLocales } = actual.local;
+      if (idTemporal >= 0 || actual.nube.id <= 0) {
+        throw new Error("Los identificadores del conflicto no son válidos.");
+      }
+
+      // PUT modifica al docente existente, sin crear duplicados.
+      const respuestaPut = await fetch(
+        `${PUT_URL}/docentes/${actual.nube.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(datosLocales),
+        }
+      );
+
+      if (!respuestaPut.ok) {
+        throw new Error(
+          `PostgreSQL rechazó la actualización (${respuestaPut.status}).`
+        );
+      }
+
+      // Comprobamos que PostgreSQL tenga realmente la versión local.
+      const comprobacion = await fetch(`${GET_URL}/docentes`);
+      if (!comprobacion.ok) {
+        throw new Error(
+          "Se envió el PUT, pero no se pudo comprobar el resultado. " +
+          "El pendiente sigue protegido; vuelve a intentarlo."
+        );
+      }
+
+      const listaActualizada: Docente[] = await comprobacion.json();
+      if (!Array.isArray(listaActualizada)) {
+        throw new Error("No se pudo verificar la actualización.");
+      }
+
+      const actualizado = listaActualizada.find(
+        (item) => item.id === actual.nube.id
+      );
+
+      // El PUT ya confirmó la actualización. El GET verifica que
+      // seguimos hablando del mismo registro y correo, sin exigir
+      // coincidencia literal en campos que el servidor puede formatear.
+      if (
+        !actualizado ||
+        normalizarCorreo(actualizado.correo) !==
+          normalizarCorreo(datosLocales.correo)
+      ) {
+        throw new Error(
+          "No se pudo confirmar el docente actualizado. " +
+          "Se conservó el pendiente de SQLite para revisarlo."
+        );
+      }
+
+      // Solo tras confirmar el PUT quitamos el POST temporal de SQLite.
+      resolverConflictoDocente(actual.pendienteId, actualizado);
+      conflictosOcultosRef.current.delete(actual.pendienteId);
+      setConflictos((anteriores) =>
+        anteriores.filter((item) => item.pendienteId !== actual.pendienteId)
+      );
+      setMensaje(
+        `Conflicto resuelto: los datos de SQLite de ${actualizado.nombre} ` +
+        "se guardaron en PostgreSQL sin crear duplicados."
+      );
+    } catch (error) {
+      setMensaje(
+        error instanceof Error
+          ? error.message
+          : "No fue posible resolver el conflicto con SQLite."
+      );
+    } finally {
+      guardandoRef.current = false;
+      setGuardando(false);
+      void consultarDocentes(false);
+    }
+  };
+
   // Dejamos el registro offline pendiente sin eliminarlo.
+  // Al volver a entrar se podrá revisar el conflicto otra vez.
   const conservarConflicto = (conflicto: ConflictoDocente) => {
     conflictosOcultosRef.current.add(conflicto.pendienteId);
 
@@ -853,6 +972,16 @@ export default function AdministrarDocentes() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  style={styles.botonResolver}
+                  disabled={guardando}
+                  onPress={() => aceptarDatosSQLite(conflicto)}
+                >
+                  <Text style={styles.textoBotonResolver}>
+                    Usar datos de SQLite
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={styles.botonConservar}
                   disabled={guardando}
                   onPress={() => conservarConflicto(conflicto)}
@@ -930,6 +1059,14 @@ export default function AdministrarDocentes() {
                     <Text style={styles.nombreDocente}>
                       {docente.nombre}
                     </Text>
+
+                    {docente.id < 0 && (
+                      <View style={styles.etiquetaPendiente}>
+                        <Text style={styles.textoPendiente}>
+                          SQLITE · PENDIENTE
+                        </Text>
+                      </View>
+                    )}
 
                     {idsNuevos.includes(docente.id) && (
                       <View style={styles.etiquetaNuevo}>
@@ -1473,6 +1610,22 @@ const styles = StyleSheet.create({
 
   textoNuevo: {
     color: "#207B49",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+
+  // Identificamos los registros temporales guardados offline.
+  etiquetaPendiente: {
+    backgroundColor: "#FFF1D6",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 7,
+    marginLeft: 8,
+    marginVertical: 3,
+  },
+
+  textoPendiente: {
+    color: "#94620D",
     fontSize: 10,
     fontWeight: "bold",
   },
