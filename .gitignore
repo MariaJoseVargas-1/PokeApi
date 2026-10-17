@@ -41,3 +41,9 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Dependencias y claves privadas
+node_modules/
+.env
+.env.*
+!.env.example

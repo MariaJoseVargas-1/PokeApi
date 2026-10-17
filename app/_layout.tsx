@@ -1,3 +1,4 @@
+
 import { FontAwesome } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import React, { useEffect } from "react";
@@ -14,11 +15,11 @@ export default function Layout() {
 
   // Preparamos SQLite cuando inicia la aplicación.
   useEffect(() => {
-  // Por ahora inicializamos SQLite solamente en Expo Go.
-  if (Platform.OS !== "web") {
-    iniciarBaseDeDatos();
-  }
-}, []);
+    // Por ahora inicializamos SQLite solamente en Expo Go.
+    if (Platform.OS !== "web") {
+      iniciarBaseDeDatos();
+    }
+  }, []);
 
   return (
     <PokemonProvider>
@@ -40,7 +41,7 @@ export default function Layout() {
             },
 
             tabBarLabelStyle: {
-              fontSize: 12,
+              fontSize: 11,
               fontWeight: "600",
             },
           }}
@@ -100,6 +101,17 @@ export default function Layout() {
                   size={size}
                   color={color}
                 />
+              ),
+            }}
+          />
+
+          {/* Sexta pestaña: nuestro asistente de IA */}
+          <Tabs.Screen
+            name="ia"
+            options={{
+              title: "IA",
+              tabBarIcon: ({ color, size }) => (
+                <FontAwesome name="comments" size={size} color={color} />
               ),
             }}
           />
