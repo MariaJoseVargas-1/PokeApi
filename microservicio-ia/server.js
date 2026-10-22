@@ -1,17 +1,38 @@
 
 const http = require("node:http");
 
+// Aquí se configura el puerto donde funciona el servidor.
 const PORT = process.env.PORT || 3001;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
+// Aquí se obtienen las claves y los modelos de las IA.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL =
+  process.env.GEMINI_MODEL || "gemini-3.8-flash";
+
+// Aquí se configura la clave y el modelo que utilizará Groq.
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL =
+  process.env.GROQ_MODEL || "openai/gpt-oss-20b";
+
+// Aquí están las direcciones de los microservicios de personajes.
 const API_POKEMON =
   "https://microservicio-pokemon-production.up.railway.app/pokemon";
 
 const API_NARUTO =
   "https://microservicio-naruto-production.up.railway.app/personajes";
 
-// Normalizamos los nombres para comparar sin importar tildes.
+// Estas son las opciones que podrá seleccionar el usuario.
+const TIEMPOS_PERMITIDOS = [20, 40, 80, 160];
+const PROVEEDORES = ["gemini", "groq"];
+
+// Esta función permite enviar mensajes de error.
+function crearError(mensaje, estado = 503) {
+  const error = new Error(mensaje);
+  error.status = estado;
+  return error;
+}
+
+// Aquí se organizan los nombres para compararlos sin importar las tildes.
 function normalizar(texto) {
   return String(texto || "")
     .normalize("NFD")
@@ -20,35 +41,38 @@ function normalizar(texto) {
     .trim();
 }
 
-// Buscamos palabras o nombres completos.
+// Aquí se revisa si un nombre aparece dentro de la pregunta.
 function contiene(texto, palabra) {
   const escapar = (valor) =>
     valor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   const buscado = normalizar(palabra);
 
-  if (!buscado) return false;
+  if (!buscado) {
+    return false;
+  }
 
   return new RegExp(
     `(^|[^a-z0-9])${escapar(buscado)}(?=$|[^a-z0-9])`
   ).test(normalizar(texto));
 }
 
-// Consultamos los personajes actuales en cada pregunta.
-// Así detectamos nuevos registros sin reiniciar el servidor.
-async function consultarPersonajes(url) {
-  const respuesta = await fetch(url, {
-    signal: AbortSignal.timeout(20000),
-  });
+// Aquí se consultan los personajes guardados en las bases de datos.
+async function consultarPersonajes(url, signal) {
+  const respuesta = await fetch(url, { signal });
 
   if (!respuesta.ok) {
-    throw new Error("No se pudo consultar la API de personajes.");
+    throw crearError(
+      "No se pudo consultar la API de personajes."
+    );
   }
 
   const datos = await respuesta.json();
 
   if (!Array.isArray(datos)) {
-    throw new Error("La API no devolvió una lista válida.");
+    throw crearError(
+      "La API no devolvió una lista válida."
+    );
   }
 
   return datos.filter(
@@ -59,13 +83,14 @@ async function consultarPersonajes(url) {
   );
 }
 
-// Creamos un catálogo dinámico con ambas bases de datos.
+// Aquí se juntan los Pokémon y los personajes de Naruto en una sola lista.
 function crearCatalogo(pokemones, ninjas) {
   const personajes = [
     ...pokemones.map((personaje) => ({
       nombre: personaje.nombre.trim(),
       universo: "Pokémon",
     })),
+
     ...ninjas.map((personaje) => ({
       nombre: personaje.nombre.trim(),
       universo: "Naruto",
@@ -73,7 +98,8 @@ function crearCatalogo(pokemones, ninjas) {
   ];
 
   return personajes.map((personaje) => {
-    const primerNombre = personaje.nombre.split(/\s+/)[0];
+    const primerNombre =
+      personaje.nombre.split(/\s+/)[0];
 
     const repetidos = personajes.filter(
       (otro) =>
@@ -91,13 +117,16 @@ function crearCatalogo(pokemones, ninjas) {
   });
 }
 
-// Identificamos los personajes registrados que aparecen en la pregunta.
+// Aquí se buscan los personajes registrados que menciona el usuario.
 function buscarRegistrados(pregunta, catalogo) {
   return catalogo.filter((personaje) =>
-    personaje.alias.some((alias) => contiene(pregunta, alias))
+    personaje.alias.some((alias) =>
+      contiene(pregunta, alias)
+    )
   );
 }
 
+// Aquí se prepara la lista de personajes disponibles.
 function listaPersonajes(catalogo) {
   const pokemon = catalogo
     .filter((p) => p.universo === "Pokémon")
@@ -113,7 +142,7 @@ function listaPersonajes(catalogo) {
   );
 }
 
-// Detectamos preguntas que solo quieren conocer el catálogo.
+// Aquí se revisa si el usuario está pidiendo la lista de personajes.
 function preguntaPorCatalogo(pregunta) {
   const expresiones = [
     "que personajes tienes",
@@ -127,11 +156,12 @@ function preguntaPorCatalogo(pregunta) {
     "lista de ninjas",
   ];
 
-  return expresiones.some((frase) => contiene(pregunta, frase));
+  return expresiones.some((frase) =>
+    contiene(pregunta, frase)
+  );
 }
 
-// Reconocemos algunos nombres externos para rechazarlos
-// sin tener que consultar Gemini.
+// Estos personajes no pertenecen a nuestras bases de datos.
 const PERSONAJES_EXTERNOS = [
   "Goku",
   "Vegeta",
@@ -152,22 +182,77 @@ const PERSONAJES_EXTERNOS = [
   "Levi Ackerman",
 ];
 
+// Aquí se revisa si preguntan por un personaje que no está registrado.
 function encontrarExternos(pregunta, catalogo) {
   return PERSONAJES_EXTERNOS.filter(
     (nombre) =>
       contiene(pregunta, nombre) &&
       !catalogo.some((personaje) =>
         personaje.alias.some(
-          (alias) => normalizar(alias) === normalizar(nombre)
+          (alias) =>
+            normalizar(alias) === normalizar(nombre)
         )
       )
   );
 }
 
-// Llamamos a Gemini una sola vez para generar la respuesta.
-async function llamarGemini(instrucciones) {
+// Aquí se leen los datos que devuelve cada servicio de IA.
+async function leerJSON(respuesta) {
+  const texto = await respuesta.text();
+
+  try {
+    return JSON.parse(texto);
+  } catch {
+    return {};
+  }
+}
+
+// Aquí se revisa si hubo algún problema al consultar una IA.
+function verificarProveedor(respuesta, resultado, nombre) {
+  if (respuesta.ok) {
+    return;
+  }
+
+  if (respuesta.status === 429) {
+    throw crearError(
+      `Se alcanzó temporalmente el límite de consultas de ${nombre}.`,
+      429
+    );
+  }
+
+  if (respuesta.status === 503) {
+    throw crearError(
+      `${nombre} está ocupado. Inténtalo más tarde.`,
+      503
+    );
+  }
+
+  if (
+    respuesta.status === 401 ||
+    respuesta.status === 403
+  ) {
+    throw crearError(
+      `No se pudo autenticar con ${nombre}. Revisa su API key.`
+    );
+  }
+
+  console.error(
+    `Error de ${nombre}:`,
+    respuesta.status,
+    JSON.stringify(resultado).slice(0, 500)
+  );
+
+  throw crearError(
+    `${nombre} no pudo generar una respuesta.`
+  );
+}
+
+// Aquí se envía la pregunta a Gemini y se obtiene su respuesta.
+async function llamarGemini(instrucciones, signal) {
   if (!GEMINI_API_KEY) {
-    throw new Error("Falta configurar GEMINI_API_KEY.");
+    throw crearError(
+      "Falta configurar GEMINI_API_KEY."
+    );
   }
 
   const respuesta = await fetch(
@@ -188,35 +273,13 @@ async function llamarGemini(instrucciones) {
           temperature: 0.3,
         },
       }),
-      signal: AbortSignal.timeout(90000),
+      signal,
     }
   );
 
-  const resultado = await respuesta.json();
+  const resultado = await leerJSON(respuesta);
 
-  if (!respuesta.ok) {
-    const codigo = resultado.error?.code || respuesta.status;
-
-    if (codigo === 503) {
-      const error = new Error(
-        "Gemini está ocupado en este momento. Inténtalo más tarde."
-      );
-      error.status = 503;
-      throw error;
-    }
-
-    if (codigo === 429) {
-      const error = new Error(
-        "Se alcanzó temporalmente el límite de consultas de Gemini."
-      );
-      error.status = 429;
-      throw error;
-    }
-
-    console.error("Error de Gemini:", JSON.stringify(resultado));
-
-    throw new Error("Gemini no pudo generar una respuesta.");
-  }
+  verificarProveedor(respuesta, resultado, "Gemini");
 
   const texto = resultado.candidates?.[0]?.content?.parts
     ?.map((parte) => parte.text || "")
@@ -224,39 +287,110 @@ async function llamarGemini(instrucciones) {
     .trim();
 
   if (!texto) {
-    throw new Error("Gemini devolvió una respuesta vacía.");
+    throw crearError(
+      "Gemini devolvió una respuesta vacía."
+    );
   }
 
   return texto;
 }
 
-// Esta función controla toda la lógica del asistente.
-async function procesarPregunta(pregunta) {
-  // Primero consultamos las bases de datos.
-  // Esto no consume cuota de Gemini.
+// Aquí se envía la pregunta a Groq y se obtiene su respuesta.
+async function llamarGroq(instrucciones, signal) {
+  if (!GROQ_API_KEY) {
+    throw crearError(
+      "Falta configurar GROQ_API_KEY."
+    );
+  }
+
+  const respuesta = await fetch(
+    "https://api.groq.com/openai/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: "user",
+            content: instrucciones,
+          },
+        ],
+        temperature: 0.3,
+      }),
+      signal,
+    }
+  );
+
+  const resultado = await leerJSON(respuesta);
+
+  verificarProveedor(respuesta, resultado, "Groq");
+
+  const texto =
+    resultado.choices?.[0]?.message?.content?.trim();
+
+  if (!texto) {
+    throw crearError(
+      "Groq devolvió una respuesta vacía."
+    );
+  }
+
+  return texto;
+}
+
+// Aquí se elige la IA que va a responder la pregunta.
+async function llamarIA(proveedor, instrucciones, signal) {
+  switch (proveedor) {
+    case "gemini":
+      return llamarGemini(instrucciones, signal);
+
+    case "groq":
+      return llamarGroq(instrucciones, signal);
+
+    default:
+      throw crearError(
+        "Proveedor de IA no disponible.",
+        400
+      );
+  }
+}
+
+// Aquí se revisa la pregunta antes de enviarla a la IA seleccionada.
+async function procesarPregunta(pregunta, proveedor, signal) {
+  // Primero se consultan los personajes de las dos bases de datos.
   const [pokemones, ninjas] = await Promise.all([
-    consultarPersonajes(API_POKEMON),
-    consultarPersonajes(API_NARUTO),
+    consultarPersonajes(API_POKEMON, signal),
+    consultarPersonajes(API_NARUTO, signal),
   ]);
 
   const catalogo = crearCatalogo(pokemones, ninjas);
   const sugerencias = listaPersonajes(catalogo);
 
-  // Mostramos los personajes registrados sin usar IA.
+  // Si piden la lista de personajes, se responde sin consultar una IA.
   if (preguntaPorCatalogo(pregunta)) {
     return {
       respuesta:
-        "**Personajes registrados:**\n\n" + sugerencias,
+        "**Personajes registrados:**\n\n" +
+        sugerencias,
       origen: "base_de_datos",
     };
   }
 
-  // Buscamos los nombres autorizados.
-  const registrados = buscarRegistrados(pregunta, catalogo);
+  // Aquí se comprueba si los personajes mencionados están registrados.
+  const registrados = buscarRegistrados(
+    pregunta,
+    catalogo
+  );
 
-  // Rechazamos algunos personajes externos conocidos.
-  const externos = encontrarExternos(pregunta, catalogo);
+  const externos = encontrarExternos(
+    pregunta,
+    catalogo
+  );
 
+  // Si el personaje es externo, no se envía la pregunta a la IA.
   if (externos.length > 0) {
     return {
       respuesta:
@@ -267,8 +401,7 @@ async function procesarPregunta(pregunta) {
     };
   }
 
-  // Si no menciona ningún personaje registrado,
-  // no gastamos una consulta de Gemini.
+  // Si no se menciona un personaje registrado, se muestra un mensaje.
   if (registrados.length === 0) {
     return {
       respuesta:
@@ -279,14 +412,13 @@ async function procesarPregunta(pregunta) {
     };
   }
 
-  // Solo los personajes encontrados en la BD están autorizados.
+  // Aquí se guardan los personajes que sí puede utilizar la IA.
   const permitidos = registrados.map((personaje) => ({
     nombre: personaje.nombre,
     universo: personaje.universo,
   }));
 
-  // Gemini puede usar todo su conocimiento, pero debe
-  // limitarse a los personajes autorizados.
+  // Estas instrucciones se utilizan tanto en Gemini como en Groq.
   const instrucciones = `
 Eres un asistente especializado en personajes de Pokémon y Naruto.
 
@@ -313,45 +445,71 @@ PREGUNTA DEL USUARIO:
 ${pregunta}
 `;
 
-  const respuesta = await llamarGemini(instrucciones);
+  // Aquí se obtiene la respuesta de la IA que eligió el usuario.
+  const respuesta = await llamarIA(
+    proveedor,
+    instrucciones,
+    signal
+  );
 
   return {
     respuesta,
-    origen: "gemini",
+    origen: proveedor,
     personajes: permitidos.map((p) => p.nombre),
   };
 }
 
-// Servidor HTTP de Node.js.
+// Aquí se crea el servidor que recibe las preguntas de la aplicación.
 const servidor = http.createServer(async (req, res) => {
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader(
+    "Content-Type",
+    "application/json; charset=utf-8"
+  );
 
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, OPTIONS"
+  );
+
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type"
+  );
+
+  // Aquí se permiten las solicitudes desde la aplicación.
   if (req.method === "OPTIONS") {
     res.writeHead(204);
     return res.end();
   }
 
+  // Esta ruta permite comprobar que el servidor está funcionando.
   if (req.method === "GET" && req.url === "/") {
     res.writeHead(200);
+
     return res.end(
       JSON.stringify({
-        mensaje: "Microservicio IA funcionando correctamente",
+        mensaje:
+          "Microservicio IA funcionando correctamente",
+        proveedores: PROVEEDORES,
+        tiempos: TIEMPOS_PERMITIDOS,
       })
     );
   }
 
+  // Aquí llegan las preguntas que envía el usuario.
   if (req.method === "POST" && req.url === "/preguntar") {
     try {
       let cuerpo = "";
 
+      // Aquí se recibe la información enviada desde el frontend.
       for await (const parte of req) {
         cuerpo += parte;
 
         if (cuerpo.length > 10000) {
           res.writeHead(413);
+
           return res.end(
             JSON.stringify({
               error: "La solicitud es demasiado grande.",
@@ -362,52 +520,149 @@ const servidor = http.createServer(async (req, res) => {
 
       let datos;
 
+      // Aquí se convierte la información recibida a JSON.
       try {
         datos = JSON.parse(cuerpo);
       } catch {
         res.writeHead(400);
+
         return res.end(
-          JSON.stringify({ error: "JSON inválido." })
+          JSON.stringify({
+            error: "JSON inválido.",
+          })
         );
       }
 
       const pregunta = datos?.pregunta;
 
+      // Aquí se comprueba que el usuario escribió una pregunta válida.
       if (
         typeof pregunta !== "string" ||
         !pregunta.trim() ||
         pregunta.length > 500
       ) {
         res.writeHead(400);
+
         return res.end(
           JSON.stringify({
-            error: "Escribe una pregunta válida de máximo 500 caracteres.",
+            error:
+              "Escribe una pregunta válida de máximo 500 caracteres.",
           })
         );
       }
 
-      const resultado = await procesarPregunta(pregunta.trim());
+      // Aquí se recibe la IA y el tiempo que eligió el usuario.
+      // Si no envía una opción, se utiliza Gemini y 40 segundos.
+      const proveedor = datos.proveedor ?? "gemini";
+      const tiempo = datos.tiempo ?? 40;
 
-      res.writeHead(200);
-      return res.end(JSON.stringify(resultado));
+      // Aquí se comprueba que la IA seleccionada esté disponible.
+      if (
+        typeof proveedor !== "string" ||
+        !PROVEEDORES.includes(proveedor)
+      ) {
+        res.writeHead(400);
+
+        return res.end(
+          JSON.stringify({
+            error:
+              "Selecciona un proveedor válido: gemini o groq.",
+          })
+        );
+      }
+
+      // Aquí se comprueba que el tiempo sea una de las opciones permitidas.
+      if (!TIEMPOS_PERMITIDOS.includes(tiempo)) {
+        res.writeHead(400);
+
+        return res.end(
+          JSON.stringify({
+            error:
+              "El tiempo debe ser 20, 40, 80 o 160 segundos.",
+          })
+        );
+      }
+
+      // Aquí comienza a contar el tiempo máximo de espera.
+      const controlador = new AbortController();
+
+      const temporizador = setTimeout(() => {
+        controlador.abort();
+      }, tiempo * 1000);
+
+      try {
+        // Aquí se procesa la pregunta con la configuración seleccionada.
+        const resultado = await procesarPregunta(
+          pregunta.trim(),
+          proveedor,
+          controlador.signal
+        );
+
+        // Si se acaba el tiempo, se muestra un mensaje de error.
+        if (controlador.signal.aborted) {
+          throw crearError(
+            `Se agotó el tiempo de espera de ${tiempo} segundos.`,
+            504
+          );
+        }
+
+        // Aquí se envía la respuesta al frontend.
+        res.writeHead(200);
+
+        return res.end(
+          JSON.stringify({
+            ...resultado,
+            proveedor,
+            tiempo,
+          })
+        );
+      } finally {
+        // Aquí se detiene el contador cuando termina la solicitud.
+        clearTimeout(temporizador);
+      }
     } catch (error) {
       console.error("Error:", error.message);
 
-      const estado = error.status || 503;
+      const agotado =
+        error.name === "AbortError" ||
+        error.name === "TimeoutError";
 
-      res.writeHead(estado);
-      return res.end(
-        JSON.stringify({
-          error: error.message,
-        })
-      );
+      const estado = agotado
+        ? 504
+        : error.status || 503;
+
+      const mensaje = agotado
+        ? "Se agotó el tiempo de espera configurado."
+        : error.message;
+
+      // Aquí se devuelve el error para mostrarlo en la aplicación.
+      if (!res.headersSent) {
+        res.writeHead(estado);
+
+        return res.end(
+          JSON.stringify({
+            error: mensaje,
+          })
+        );
+      }
     }
+
+    return;
   }
 
+  // Aquí se responde cuando la ruta solicitada no existe.
   res.writeHead(404);
-  res.end(JSON.stringify({ error: "Ruta no encontrada." }));
+
+  res.end(
+    JSON.stringify({
+      error: "Ruta no encontrada.",
+    })
+  );
 });
 
+// Aquí se inicia el microservicio.
 servidor.listen(PORT, "0.0.0.0", () => {
-  console.log(`Microservicio IA funcionando en el puerto ${PORT}`);
+  console.log(
+    `Microservicio IA funcionando en el puerto ${PORT}`
+  );
 });
