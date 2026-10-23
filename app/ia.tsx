@@ -17,8 +17,8 @@ import {
 } from "react-native";
 
 // Aquí está la dirección de nuestro microservicio.
-// Por ahora la usamos desde Expo Web en el computador.
-const API_IA = "http://192.168.1.5:3001";
+// Ahora esat en Render
+const API_IA = "https://microservicio-ia-p24z.onrender.com";
 
 // Aquí están las tres inteligencias artificiales disponibles.
 type Proveedor = "gemini" | "groq" | "nvidia";
