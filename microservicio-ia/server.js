@@ -1,31 +1,37 @@
 
 const http = require("node:http");
 
-// Aquí se configura el puerto donde funciona el servidor.
+// Aquí se configura el puerto donde funciona nuestro servidor.
 const PORT = process.env.PORT || 3001;
 
-// Aquí se obtienen las claves y los modelos de las IA.
+// Aquí se configura la clave y el modelo de Gemini.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL =
   process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
-// Aquí se configura la clave y el modelo que utilizará Groq.
+// Aquí se configura la clave y el modelo de Groq.
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL =
   process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 
-// Aquí están las direcciones de los microservicios de personajes.
+// Aquí se configura la clave y el modelo de NVIDIA.
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
+const NVIDIA_MODEL =
+  process.env.NVIDIA_MODEL ||
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
+
+// Aquí están las direcciones de nuestros microservicios de personajes.
 const API_POKEMON =
   "https://microservicio-pokemon-production.up.railway.app/pokemon";
 
 const API_NARUTO =
   "https://microservicio-naruto-production.up.railway.app/personajes";
 
-// Estas son las opciones que podrá seleccionar el usuario.
+// Aquí se guardan los tiempos y las IA que puede elegir el usuario.
 const TIEMPOS_PERMITIDOS = [20, 40, 80, 160];
-const PROVEEDORES = ["gemini", "groq"];
+const PROVEEDORES = ["gemini", "groq", "nvidia"];
 
-// Esta función permite enviar mensajes de error.
+// Esta función permite crear mensajes de error.
 function crearError(mensaje, estado = 503) {
   const error = new Error(mensaje);
   error.status = estado;
@@ -57,7 +63,7 @@ function contiene(texto, palabra) {
   ).test(normalizar(texto));
 }
 
-// Aquí se consultan los personajes guardados en las bases de datos.
+// Aquí se consultan los personajes guardados en nuestras bases de datos.
 async function consultarPersonajes(url, signal) {
   const respuesta = await fetch(url, { signal });
 
@@ -83,7 +89,7 @@ async function consultarPersonajes(url, signal) {
   );
 }
 
-// Aquí se juntan los Pokémon y los personajes de Naruto en una sola lista.
+// Aquí se juntan los Pokémon y los personajes de Naruto.
 function crearCatalogo(pokemones, ninjas) {
   const personajes = [
     ...pokemones.map((personaje) => ({
@@ -161,7 +167,7 @@ function preguntaPorCatalogo(pregunta) {
   );
 }
 
-// Estos personajes no pertenecen a nuestras bases de datos.
+// Aquí se guardan algunos personajes que no están en nuestras bases de datos.
 const PERSONAJES_EXTERNOS = [
   "Goku",
   "Vegeta",
@@ -341,6 +347,57 @@ async function llamarGroq(instrucciones, signal) {
   return texto;
 }
 
+// Aquí se envía la pregunta a NVIDIA y se obtiene su respuesta.
+async function llamarNvidia(instrucciones, signal) {
+  if (!NVIDIA_API_KEY) {
+    throw crearError(
+      "Falta configurar NVIDIA_API_KEY."
+    );
+  }
+
+  const respuesta = await fetch(
+    "https://integrate.api.nvidia.com/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${NVIDIA_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: NVIDIA_MODEL,
+        messages: [
+          {
+            role: "user",
+            content: instrucciones,
+          },
+        ],
+        // Aquí se evita que la respuesta llegue por partes.
+        stream: false,
+
+        // Aquí se limita la cantidad de tokens de la respuesta.
+        max_tokens: 500,
+      }),
+      signal,
+    }
+  );
+
+  const resultado = await leerJSON(respuesta);
+
+  verificarProveedor(respuesta, resultado, "NVIDIA");
+
+  // Aquí se obtiene el texto generado por NVIDIA.
+  const texto =
+    resultado.choices?.[0]?.message?.content?.trim();
+
+  if (!texto) {
+    throw crearError(
+      "NVIDIA devolvió una respuesta vacía."
+    );
+  }
+
+  return texto;
+}
+
 // Aquí se elige la IA que va a responder la pregunta.
 async function llamarIA(proveedor, instrucciones, signal) {
   switch (proveedor) {
@@ -349,6 +406,9 @@ async function llamarIA(proveedor, instrucciones, signal) {
 
     case "groq":
       return llamarGroq(instrucciones, signal);
+
+    case "nvidia":
+      return llamarNvidia(instrucciones, signal);
 
     default:
       throw crearError(
@@ -418,7 +478,7 @@ async function procesarPregunta(pregunta, proveedor, signal) {
     universo: personaje.universo,
   }));
 
-  // Estas instrucciones se utilizan tanto en Gemini como en Groq.
+  // Estas instrucciones se utilizan con Gemini, Groq y NVIDIA.
   const instrucciones = `
 Eres un asistente especializado en personajes de Pokémon y Naruto.
 
@@ -566,7 +626,7 @@ const servidor = http.createServer(async (req, res) => {
         return res.end(
           JSON.stringify({
             error:
-              "Selecciona un proveedor válido: gemini o groq.",
+              "Selecciona un proveedor válido: gemini, groq o nvidia.",
           })
         );
       }
@@ -660,7 +720,7 @@ const servidor = http.createServer(async (req, res) => {
   );
 });
 
-// Aquí se inicia el microservicio.
+// Aquí se inicia nuestro microservicio.
 servidor.listen(PORT, "0.0.0.0", () => {
   console.log(
     `Microservicio IA funcionando en el puerto ${PORT}`

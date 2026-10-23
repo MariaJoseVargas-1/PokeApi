@@ -18,19 +18,48 @@ import {
 
 // Aquí está la dirección de nuestro microservicio.
 // Por ahora la usamos desde Expo Web en el computador.
-const API_IA = "http://localhost:3001";
+const API_IA = "http://192.168.1.5:3001";
 
-// Estas son las inteligencias artificiales disponibles.
-type Proveedor = "gemini" | "groq";
+// Aquí están las tres inteligencias artificiales disponibles.
+type Proveedor = "gemini" | "groq" | "nvidia";
 
-// Estos son los tiempos que podemos seleccionar.
+// Aquí están los tiempos que puede seleccionar el usuario.
 type TiempoEspera = 20 | 40 | 80 | 160;
 
+// Aquí definimos cómo se guarda cada mensaje del chat.
 type Mensaje = {
   id: number;
   tipo: "usuario" | "ia";
   texto: string;
 };
+
+// Aquí guardamos las opciones de inteligencia artificial.
+const PROVEEDORES: Proveedor[] = [
+  "gemini",
+  "groq",
+  "nvidia",
+];
+
+// Aquí guardamos los tiempos disponibles.
+const TIEMPOS: TiempoEspera[] = [
+  20,
+  40,
+  80,
+  160,
+];
+
+// Aquí mostramos el nombre de cada inteligencia artificial.
+function nombreProveedor(proveedor: Proveedor) {
+  if (proveedor === "gemini") {
+    return "Gemini";
+  }
+
+  if (proveedor === "groq") {
+    return "Groq";
+  }
+
+  return "NVIDIA";
+}
 
 // Estas preguntas aparecen como sugerencias debajo del chat.
 const PREGUNTAS_RAPIDAS = [
@@ -64,9 +93,11 @@ function prepararRespuesta(texto: string) {
     .replace(/\\n/g, "\n");
 }
 
+// Aquí comienza nuestra pantalla de inteligencia artificial.
 export default function PantallaIA() {
   const { width } = useWindowDimensions();
 
+  // Aquí revisamos si estamos en una pantalla grande.
   const esPantallaGrande = width >= 800;
 
   // Aquí guardamos lo que escribe el usuario.
@@ -76,6 +107,7 @@ export default function PantallaIA() {
   const [cargando, setCargando] = useState(false);
 
   // Aquí elegimos la IA que responderá.
+  // Groq queda seleccionada al abrir la pantalla.
   const [proveedor, setProveedor] =
     useState<Proveedor>("groq");
 
@@ -100,7 +132,10 @@ export default function PantallaIA() {
     },
   ]);
 
+  // Aquí guardamos la referencia del chat para bajar automáticamente.
   const scrollRef = useRef<ScrollView>(null);
+
+  // Aquí damos un número diferente a cada mensaje.
   const siguienteId = useRef(2);
 
   // Aquí agregamos mensajes sin borrar los anteriores.
@@ -122,10 +157,12 @@ export default function PantallaIA() {
   async function enviarPregunta(texto?: string) {
     const consulta = (texto ?? pregunta).trim();
 
+    // Aquí evitamos enviar preguntas vacías o repetidas.
     if (!consulta || cargando) {
       return;
     }
 
+    // Aquí comprobamos que la pregunta no sea demasiado larga.
     if (consulta.length > 500) {
       Alert.alert(
         "Pregunta muy larga",
@@ -134,22 +171,25 @@ export default function PantallaIA() {
       return;
     }
 
-    // Guardamos las opciones utilizadas para esta pregunta.
+    // Aquí guardamos las opciones usadas en esta pregunta.
     const proveedorElegido = proveedor;
     const tiempoElegido = tiempo;
 
+    // Aquí mostramos la pregunta y activamos la animación.
     setPregunta("");
     agregarMensaje("usuario", consulta);
     setCargando(true);
 
-    // Aquí controlamos el tiempo de espera desde la aplicación.
+    // Aquí controlamos el tiempo máximo de espera.
     const controlador = new AbortController();
 
+    // Damos un pequeño margen para recibir el error del servidor.
     const temporizador = setTimeout(() => {
       controlador.abort();
     }, tiempoElegido * 1000 + 1500);
 
     try {
+      // Aquí enviamos la pregunta a nuestro microservicio.
       const respuesta = await fetch(`${API_IA}/preguntar`, {
         method: "POST",
         headers: {
@@ -163,15 +203,17 @@ export default function PantallaIA() {
         signal: controlador.signal,
       });
 
+      // Aquí leemos la respuesta del microservicio.
       const datos = await respuesta.json();
 
+      // Aquí mostramos el error si la consulta no funcionó.
       if (!respuesta.ok) {
         throw new Error(
           datos.error || "No se pudo consultar el asistente."
         );
       }
 
-      // Aquí mostramos la respuesta en nuestra conversación.
+      // Aquí agregamos la respuesta de la IA al chat.
       agregarMensaje(
         "ia",
         prepararRespuesta(
@@ -179,23 +221,27 @@ export default function PantallaIA() {
         )
       );
     } catch (error) {
+      // Aquí revisamos si se agotó el tiempo.
       const seAgotoTiempo =
         controlador.signal.aborted ||
         (error instanceof Error &&
           error.name === "AbortError");
 
+      // Aquí preparamos el mensaje de error.
       const detalle = seAgotoTiempo
         ? `Se agotó el tiempo de espera de ${tiempoElegido} segundos.`
         : error instanceof Error
           ? error.message
           : "Error desconocido.";
 
+      // Aquí mostramos el problema dentro de la conversación.
       agregarMensaje(
         "ia",
         "No pude obtener la respuesta.\n\n" +
           `**Detalle:** ${detalle}`
       );
     } finally {
+      // Aquí detenemos el contador y quitamos la animación.
       clearTimeout(temporizador);
       setCargando(false);
     }
@@ -212,7 +258,7 @@ export default function PantallaIA() {
           esPantallaGrande && styles.contenedorGrande,
         ]}
       >
-        {/* Encabezado de nuestro asistente */}
+        {/* Aquí está el encabezado de nuestro asistente */}
         <View style={styles.encabezado}>
           <View style={styles.logo}>
             <FontAwesome
@@ -263,7 +309,7 @@ export default function PantallaIA() {
           </Pressable>
         </View>
 
-        {/* Mostramos qué IA y tiempo están seleccionados */}
+        {/* Aquí mostramos qué IA y tiempo están seleccionados */}
         <Pressable
           onPress={() =>
             setMostrarConfiguracion((anterior) => !anterior)
@@ -284,7 +330,7 @@ export default function PantallaIA() {
 
           <View style={styles.configuracionDerecha}>
             <Text style={styles.resumenConfiguracion}>
-              {proveedor === "gemini" ? "Gemini" : "Groq"}
+              {nombreProveedor(proveedor)}
               {"  ·  "}
               {tiempo} s
             </Text>
@@ -301,78 +347,74 @@ export default function PantallaIA() {
           </View>
         </Pressable>
 
-        {/* Las opciones aparecen solamente cuando las abrimos */}
+        {/* Aquí mostramos las opciones cuando abrimos la configuración */}
         {mostrarConfiguracion && (
           <View style={styles.panelConfiguracion}>
             <Text style={styles.etiquetaOpciones}>
               Inteligencia artificial
             </Text>
 
+            {/* Aquí aparecen Gemini, Groq y NVIDIA */}
             <View style={styles.filaOpciones}>
-              {(["gemini", "groq"] as Proveedor[]).map(
-                (opcion) => (
-                  <Pressable
-                    key={opcion}
-                    disabled={cargando}
-                    onPress={() => setProveedor(opcion)}
+              {PROVEEDORES.map((opcion) => (
+                <Pressable
+                  key={opcion}
+                  disabled={cargando}
+                  onPress={() => setProveedor(opcion)}
+                  style={[
+                    styles.opcion,
+                    proveedor === opcion &&
+                      styles.opcionSeleccionada,
+                    cargando && styles.opcionDesactivada,
+                  ]}
+                >
+                  <Text
                     style={[
-                      styles.opcion,
+                      styles.textoOpcion,
                       proveedor === opcion &&
-                        styles.opcionSeleccionada,
-                      cargando && styles.opcionDesactivada,
+                        styles.textoOpcionSeleccionada,
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.textoOpcion,
-                        proveedor === opcion &&
-                          styles.textoOpcionSeleccionada,
-                      ]}
-                    >
-                      {opcion === "gemini"
-                        ? "Gemini"
-                        : "Groq"}
-                    </Text>
-                  </Pressable>
-                )
-              )}
+                    {nombreProveedor(opcion)}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
 
             <Text style={styles.etiquetaOpciones}>
               Tiempo máximo de espera
             </Text>
 
+            {/* Aquí aparecen los cuatro tiempos disponibles */}
             <View style={styles.filaOpciones}>
-              {([20, 40, 80, 160] as TiempoEspera[]).map(
-                (opcion) => (
-                  <Pressable
-                    key={opcion}
-                    disabled={cargando}
-                    onPress={() => setTiempo(opcion)}
+              {TIEMPOS.map((opcion) => (
+                <Pressable
+                  key={opcion}
+                  disabled={cargando}
+                  onPress={() => setTiempo(opcion)}
+                  style={[
+                    styles.opcion,
+                    tiempo === opcion &&
+                      styles.opcionSeleccionada,
+                    cargando && styles.opcionDesactivada,
+                  ]}
+                >
+                  <Text
                     style={[
-                      styles.opcion,
+                      styles.textoOpcion,
                       tiempo === opcion &&
-                        styles.opcionSeleccionada,
-                      cargando && styles.opcionDesactivada,
+                        styles.textoOpcionSeleccionada,
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.textoOpcion,
-                        tiempo === opcion &&
-                          styles.textoOpcionSeleccionada,
-                      ]}
-                    >
-                      {opcion} s
-                    </Text>
-                  </Pressable>
-                )
-              )}
+                    {opcion} s
+                  </Text>
+                </Pressable>
+              ))}
             </View>
           </View>
         )}
 
-        {/* Este es el espacio principal de la conversación */}
+        {/* Aquí está el espacio principal de la conversación */}
         <View style={styles.contenedorChat}>
           <ScrollView
             ref={scrollRef}
@@ -385,6 +427,7 @@ export default function PantallaIA() {
               })
             }
           >
+            {/* Aquí mostramos todos los mensajes */}
             {mensajes.map((mensaje) => (
               <View
                 key={mensaje.id}
@@ -395,7 +438,7 @@ export default function PantallaIA() {
                     : styles.filaIA,
                 ]}
               >
-                {/* Mostramos el avatar junto a las respuestas */}
+                {/* Aquí mostramos el avatar de la IA */}
                 {mensaje.tipo === "ia" && (
                   <View style={styles.avatarIA}>
                     <FontAwesome
@@ -406,6 +449,7 @@ export default function PantallaIA() {
                   </View>
                 )}
 
+                {/* Aquí mostramos la burbuja del mensaje */}
                 <View
                   style={[
                     styles.burbuja,
@@ -427,7 +471,7 @@ export default function PantallaIA() {
               </View>
             ))}
 
-            {/* Esta animación aparece mientras responde la IA */}
+            {/* Aquí mostramos la animación mientras responde la IA */}
             {cargando && (
               <View
                 style={[
@@ -450,11 +494,7 @@ export default function PantallaIA() {
                   />
 
                   <Text style={styles.textoCargando}>
-                    Consultando{" "}
-                    {proveedor === "gemini"
-                      ? "Gemini"
-                      : "Groq"}
-                    ...
+                    Consultando {nombreProveedor(proveedor)}...
                   </Text>
                 </View>
               </View>
@@ -462,7 +502,7 @@ export default function PantallaIA() {
           </ScrollView>
         </View>
 
-        {/* Las preguntas rápidas quedan cerca del campo de escritura */}
+        {/* Aquí están las preguntas rápidas y el campo de escritura */}
         <View style={styles.seccionInferior}>
           <View style={styles.encabezadoSugerencias}>
             <FontAwesome
@@ -476,6 +516,7 @@ export default function PantallaIA() {
             </Text>
           </View>
 
+          {/* Aquí mostramos las preguntas rápidas */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -520,6 +561,7 @@ export default function PantallaIA() {
               textAlignVertical="top"
             />
 
+            {/* Aquí enviamos la pregunta */}
             <Pressable
               onPress={() => enviarPregunta()}
               disabled={!pregunta.trim() || cargando}
@@ -559,7 +601,7 @@ export default function PantallaIA() {
   );
 }
 
-// Aquí damos formato a las respuestas de Gemini y Groq.
+// Aquí damos formato a las respuestas de Gemini, Groq y NVIDIA.
 const estilosMarkdown = {
   body: {
     color: "#31516F",
@@ -652,7 +694,7 @@ const estilosMarkdown = {
   },
 };
 
-// Aquí están los estilos de nuestra nueva pantalla.
+// Aquí están todos los estilos de nuestra pantalla.
 const styles = StyleSheet.create({
   pantalla: {
     flex: 1,
@@ -830,7 +872,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
 
-  // El chat ocupa todo el espacio que queda disponible.
+  // Aquí hacemos que el chat ocupe el espacio disponible.
   contenedorChat: {
     flex: 1,
     minHeight: 0,
